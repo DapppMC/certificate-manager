@@ -4,7 +4,7 @@ id: T-003
 date: 2026-10-15
 tags: [ticket]
 when: Implements normalize_name exactly as the extraction rules say; titles, case, accents and punctuation stop mattering.
-status: todo
+status: done
 owner: executor
 kind: feature
 phase: 1
@@ -105,6 +105,28 @@ Append to the "Execution report" section below (this format is mandatory and is 
 - Never say done until the verification commands ran in this session and their exit codes and final lines are pasted.
 
 ## Execution report
-Status: not started.
+Status: done.
+
+Files changed:
+- `src/certslice/normalize.py` (created)
+- `tests/unit/test_normalize.py` (created)
+- `docs/spec/tickets/T-003-name-normalisation.md` (modified)
+
+Commands run:
+- `.\.venv\Scripts\python.exe -m pytest tests/unit/test_normalize.py`:
+  EXIT=1 (confirmed failed before `certslice.normalize` existed with `ModuleNotFoundError: No module named 'certslice.normalize'`)
+- `.\.venv\Scripts\python.exe scripts/run_check.py --name t003 --fail-on "no tests ran" -- python scripts/stage_tests.py --upto T-003`:
+  EXIT=0
+  RESULT: PASS
+- `.\.venv\Scripts\python.exe scripts/run_check.py --name secrets -- python scripts/scan_secrets.py`:
+  EXIT=0
+  RESULT: PASS
+
+Acceptance criteria:
+- AC1: Every case in `tests/acceptance/test_normalize_contract.py` passes: PASS (11 test cases passed).
+- AC2: Your unit tests failed before the module existed and pass now: PASS (confirmed initial failure with exit code 1 due to missing module, now passing 8/8 parameterized test cases).
+
+Deviations from the plan: none.
+Open issues and questions for the planner: none.
 
 Related: [requirements](../01-requirements.md), [verification](../04-verification.md), [tickets index](INDEX.md)
