@@ -4,7 +4,7 @@ id: T-018
 date: 2026-10-15
 tags: [ticket]
 when: Adds ocr.py; LocalPageReader OCRs pages without a text layer and merges OCR into sparse pages over a background picture.
-status: todo
+status: done
 owner: executor
 kind: feature
 phase: 1
@@ -106,6 +106,37 @@ Append to the "Execution report" section below (this format is mandatory and is 
 - Never say done until the verification commands ran in this session and their exit codes and final lines are pasted.
 
 ## Execution report
-Status: not started.
+- Ticket: T-018
+- Status: done
+- Files changed:
+  - `src/certslice/ocr.py` (created)
+  - `src/certslice/reader.py` (modified: added OCR fallback and sparse-page merging)
+  - `src/certslice/pipeline.py` (modified: passed OCR seconds to timings)
+  - `tests/unit/test_ocr.py` (created)
+  - `docs/spec/tickets/T-018-ocr-in-reader.md` (modified)
+- Commands run:
+  - `.\.venv\Scripts\python.exe scripts/run_check.py --name t018 --fail-on "no tests ran" -- python scripts/stage_tests.py --upto T-018`
+    ```
+    148 passed in 14.94s
+    RUN: -m pytest -q -p no:cacheprovider tests/acceptance/test_t001_skeleton.py tests/acceptance/test_normalize_contract.py tests/acceptance/test_database.py tests/acceptance/test_pdf_input.py tests/acceptance/test_reader_hook.py tests/acceptance/test_matching.py tests/acceptance/test_names_real_patterns.py tests/acceptance/test_signatory.py tests/acceptance/test_fields_dates.py tests/acceptance/test_dates_contract.py tests/acceptance/test_grouping.py tests/acceptance/test_fields_text.py tests/acceptance/test_expiry.py tests/acceptance/test_naming.py tests/acceptance/test_outputs.py tests/acceptance/test_pipeline.py tests/acceptance/test_speed.py tests/acceptance/test_offline.py tests/acceptance/test_ocr.py tests/unit
+    [run_check] full output: .check-logs\t018.log
+    EXIT=0
+    RESULT: PASS
+    ```
+  - `python scripts/run_check.py --name secrets -- python scripts/scan_secrets.py`
+    ```
+    scanned 169 file(s); findings=0
+    RESULT: PASS
+    [run_check] full output: .check-logs\secrets.log
+    EXIT=0
+    RESULT: PASS
+    ```
+- Acceptance criteria:
+  - AC1 (`bundle_scan.pdf` pages have source `ocr`, NIDs 0044444 and 8812345, `ocr_seconds_per_page` > 0): PASS (`test_scanned_pages_are_read_by_ocr`)
+  - AC2 (`bundle_k3_like.pdf` pages have source `mixed`, fields extracted, cue line keeps `Sudarmaji` out): PASS (`test_background_picture_labels_are_read_by_ocr`)
+  - AC3 (With `--no-ocr` both pages are unmatched with reason `no text`): PASS (`test_scanned_pages_without_ocr_are_reported`)
+  - AC4 (OCR run with sockets blocked succeeds): PASS (`test_ocr_run_offline`)
+- Deviations from the plan: none
+- Open issues and questions for the planner: none
 
 Related: [requirements](../01-requirements.md), [verification](../04-verification.md), [tickets index](INDEX.md)

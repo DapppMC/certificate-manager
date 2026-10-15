@@ -173,6 +173,9 @@ def run(
                 "file_name": None,
             })
 
+        ocr_times = getattr(rdr, "ocr_seconds", [])
+        ocr_pages = len(ocr_times)
+        ocr_seconds_per_page = round(sum(ocr_times) / ocr_pages, 3) if ocr_pages > 0 else None
         plan_data = {
             "version": 1,
             "input_pdf": str(pdf_file),
@@ -186,8 +189,8 @@ def run(
             "timings": {
                 "read_seconds": round(t_read - t0, 3),
                 "total_seconds": round(time.perf_counter() - t0, 3),
-                "ocr_pages": 0,
-                "ocr_seconds_per_page": None,
+                "ocr_pages": ocr_pages,
+                "ocr_seconds_per_page": ocr_seconds_per_page,
             },
         }
         plan_path = run_dir / "plan.json"
@@ -345,6 +348,10 @@ def run(
 
     doc.close()
 
+    ocr_times = getattr(rdr, "ocr_seconds", [])
+    ocr_pages = len(ocr_times)
+    ocr_seconds_per_page = round(sum(ocr_times) / ocr_pages, 3) if ocr_pages > 0 else None
+
     # (h) Write plan.json
     plan_data = {
         "version": 1,
@@ -359,8 +366,8 @@ def run(
         "timings": {
             "read_seconds": round(t_read - t0, 3),
             "total_seconds": round(time.perf_counter() - t0, 3),
-            "ocr_pages": 0,
-            "ocr_seconds_per_page": None,
+            "ocr_pages": ocr_pages,
+            "ocr_seconds_per_page": ocr_seconds_per_page,
         },
     }
 
