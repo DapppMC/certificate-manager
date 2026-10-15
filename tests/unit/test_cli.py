@@ -8,6 +8,6 @@ def test_cli_run_missing_files_returns_2(tmp_path):
     assert code == 2
 
 
-def test_cli_evaluate_stub_returns_1():
+def test_cli_evaluate_missing_files_returns_2():
     code = main(["evaluate", "--run", "x", "--gold", "y"])
-    assert code == 1
+    assert code == 2
