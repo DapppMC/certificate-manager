@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "certslice"
+version = "0.1.0"
+description = "Split bundled certificate PDFs, match holders to the employee database and name the files."
+requires-python = ">=3.10"
+# Runtime packages are pinned in requirements.txt (installed first); none are repeated here on purpose.
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+certslice = ["default_config.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-p no:cacheprovider"

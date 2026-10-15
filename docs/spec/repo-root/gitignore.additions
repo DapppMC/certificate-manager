@@ -1,0 +1,27 @@
+# --- planner kit ---
+.env
+.env.*
+!.env.example
+.check-logs/
+.agent-run/
+assets/_candidates/
+node_modules/
+.obsidian/workspace*.json
+.obsidian/cache
+.trash/
+.od/
+.agents/mcp_config.local.json
+.agents/mcp_config.json*
+.bootstrap-backup-*/
+.bootstrap-tmp-*/
+# never ignore .agents/ or AGENTS.md
+# --- certificate slicer ---
+.venv/
+__pycache__/
+*.egg-info/
+samples/
+out/
+hasil/
+spikes/output/
+build/
+dist/
