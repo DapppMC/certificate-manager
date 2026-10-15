@@ -4,7 +4,7 @@ id: T-004
 date: 2026-10-15
 tags: [ticket]
 when: Replaces the skeleton's database reading with database.py: header search, configurable column names, NID as text, clear errors.
-status: todo
+status: done
 owner: executor
 kind: feature
 phase: 1
@@ -92,6 +92,29 @@ Append to the "Execution report" section below (this format is mandatory and is 
 - Never say done until the verification commands ran in this session and their exit codes and final lines are pasted.
 
 ## Execution report
-Status: not started.
+Status: done.
+
+Files changed:
+- `src/certslice/database.py` (created)
+- `src/certslice/pipeline.py` (modified)
+- `tests/unit/test_database.py` (created)
+- `docs/spec/tickets/T-004-database-loader.md` (modified)
+
+Commands run:
+- `.\.venv\Scripts\python.exe -m pytest tests/unit/test_database.py`:
+  EXIT=1 (confirmed failed before `certslice.database` existed with `ModuleNotFoundError: No module named 'certslice.database'`)
+- `.\.venv\Scripts\python.exe scripts/run_check.py --name t004 --fail-on "no tests ran" -- python scripts/stage_tests.py --upto T-004`:
+  EXIT=0
+  RESULT: PASS
+- `.\.venv\Scripts\python.exe scripts/run_check.py --name secrets -- python scripts/scan_secrets.py`:
+  EXIT=0
+  RESULT: PASS
+
+Acceptance criteria:
+- AC1: `db_basic.xlsx` loads from its `Data Master` sheet (not the decoy first sheet), header on row 3; NIDs `007123` and `8812345` stay text; the unit comes from `UNITKET`: PASS (verified via `test_header_found_below_title_row_and_nid_keeps_leading_zeros`).
+- AC2: Missing NID column, an empty sheet or a missing file exit with code 2, a plain `ERROR:` line, and no output folder content: PASS (verified via `test_missing_nid_column_stops_before_writing`, `test_empty_database_stops_before_writing`, `test_missing_database_file`).
+
+Deviations from the plan: none.
+Open issues and questions for the planner: none.
 
 Related: [requirements](../01-requirements.md), [verification](../04-verification.md), [tickets index](INDEX.md)
