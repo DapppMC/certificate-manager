@@ -9,6 +9,7 @@ import re
 from certslice.config import load_config
 from certslice.database import load_employees
 from certslice.errors import InputError
+from certslice.fields import extract_dates, extract_number
 from certslice.matcher import cue_filter, decide, page_candidates, template_employees
 from certslice.reader import LocalPageReader, open_pdf
 import pymupdf
@@ -114,6 +115,16 @@ def run(
                 cd["partial"] = True
             cand_group.append(cd)
 
+        num_val = extract_number(lines, cfg)
+        num_conf = "high" if num_val is not None else "low"
+        iss_val, iss_conf, exp_val, exp_conf = extract_dates(lines, cfg)
+        fields_dict = {
+            "number": {"value": num_val, "confidence": num_conf},
+            "issue_date": {"value": iss_val.isoformat() if iss_val else None, "confidence": iss_conf},
+            "expiry_date": {"value": exp_val.isoformat() if exp_val else None, "confidence": exp_conf},
+        }
+        expiry_source = "printed" if exp_val else None
+
         if status == "accepted" and top is not None:
             matched_emp = employees[top.index]
             file_name = f"{matched_emp.nid}_{matched_emp.nama}.pdf"
@@ -127,8 +138,8 @@ def run(
                 "email": matched_emp.email,
                 "unit": matched_emp.unit,
                 "candidates": cand_group,
-                "fields": {},
-                "expiry_source": None,
+                "fields": fields_dict,
+                "expiry_source": expiry_source,
                 "renewal": None,
                 "file_name": file_name,
             }
@@ -143,8 +154,8 @@ def run(
                 "email": None,
                 "unit": None,
                 "candidates": cand_group,
-                "fields": {},
-                "expiry_source": None,
+                "fields": fields_dict,
+                "expiry_source": expiry_source,
                 "renewal": None,
                 "file_name": None,
             }

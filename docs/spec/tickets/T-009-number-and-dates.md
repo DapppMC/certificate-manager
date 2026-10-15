@@ -4,7 +4,7 @@ id: T-009
 date: 2026-10-15
 tags: [ticket]
 when: Creates fields.py with the number rule and the Indonesian/English date rules; fills number, issue and expiry in plan.json.
-status: todo
+status: done
 owner: executor
 kind: feature
 phase: 1
@@ -95,6 +95,25 @@ Append to the "Execution report" section below (this format is mandatory and is 
 - Never say done until the verification commands ran in this session and their exit codes and final lines are pasted.
 
 ## Execution report
-Status: not started.
+Status: done.
+- Ticket: T-009, status: done
+- Files changed:
+  - `src/certslice/fields.py` (created)
+  - `src/certslice/pipeline.py` (modified)
+  - `tests/unit/test_fields_dates.py` (created)
+- Commands run:
+  - `.\.venv\Scripts\python.exe scripts/run_check.py --name t009 --fail-on "no tests ran" -- python scripts/stage_tests.py --upto T-009`:
+    EXIT=0
+    RESULT: PASS
+  - `.\.venv\Scripts\python.exe scripts/run_check.py --name secrets -- python scripts/scan_secrets.py`:
+    EXIT=0
+    RESULT: PASS
+- Acceptance criteria:
+  - AC1: pass (bundle_simple.pdf page 1: number 123/LSP-PLN/VIII/2025, issue 2025-08-17, expiry 2028-08-16 high)
+  - AC2: pass (Every case of tests/acceptance/test_dates_contract.py passes)
+  - AC3: pass (bundle_mixed.pdf page 7: issue date null with confidence low)
+  - AC4: pass (bundle_djk.pdf: issue 2025-08-17 high from Ditetapkan ...; number DJK.0701.2025)
+- Deviations from the plan: none
+- Open issues and questions for the planner: none
 
 Related: [requirements](../01-requirements.md), [verification](../04-verification.md), [tickets index](INDEX.md)
