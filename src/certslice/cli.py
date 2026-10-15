@@ -31,13 +31,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     run_parser.add_argument("--no-ocr", action="store_true", help="Disable OCR fallback")
     run_parser.add_argument("--config", default=None, help="Path to custom TOML config file")
+    run_parser.add_argument("--use-ai", action="store_true", help="Enable Gemini AI rescue layer for unmatched certificates")
+    run_parser.add_argument("--gemini-api-key", default=None, help="Google Gemini API key")
 
     # Subcommand: evaluate
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate run results against gold set")
     eval_parser.add_argument("--run", required=True, help="Path to run folder")
     eval_parser.add_argument("--gold", required=True, help="Path to gold.csv")
 
+    # Subcommand: gui
+    subparsers.add_parser("gui", help="Launch desktop graphical user interface")
+
     args = parser.parse_args(argv)
+
+    if args.subcommand == "gui":
+        from certslice.gui import launch_gui
+        launch_gui()
+        return 0
 
     if args.subcommand == "evaluate":
         try:
@@ -56,6 +66,8 @@ def main(argv: list[str] | None = None) -> int:
                 pages_per_cert=args.pages_per_cert,
                 ocr=not args.no_ocr,
                 config_path=args.config,
+                use_ai=args.use_ai,
+                gemini_api_key=args.gemini_api_key,
             )
         except InputError as e:
             sys.stderr.write(f"ERROR: {e}\n")

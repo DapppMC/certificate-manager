@@ -12,6 +12,7 @@ from certslice.config import fold_text, load_aliases, load_config
 from certslice.database import load_employees
 from certslice.errors import AccountingError, InputError
 from certslice.expiry import apply_rules
+from certslice.gemini import GeminiRescue, load_user_settings
 from certslice.fields import (
     doc_type,
     extract_dates,
@@ -49,9 +50,17 @@ def run(
     ocr=True,
     config_path=None,
     reader=None,
+    use_ai=False,
+    gemini_api_key=None,
+    gemini_model="gemini-2.5-flash",
 ) -> RunResult:
     t0 = time.perf_counter()
     cfg = load_config(config_path)
+    if not gemini_api_key:
+        settings = load_user_settings()
+        gemini_api_key = settings.get("gemini_api_key")
+        if not use_ai and settings.get("use_ai"):
+            use_ai = True
     pdf_file = Path(pdf_path)
     db_file = Path(db_path)
     out_path = Path(out_dir)
@@ -253,6 +262,34 @@ def run(
         }
 
         first_source = all_page_pts[first_p - 1].source
+
+        if status != "accepted" and use_ai and gemini_api_key:
+            first_page_obj = doc[first_p - 1]
+            rescue_engine = GeminiRescue(api_key=gemini_api_key, model=gemini_model)
+            rescue_res = rescue_engine.rescue_group(first_page_obj, deciding_cands, employees)
+            if rescue_res and rescue_res.get("candidate") is not None:
+                cand = rescue_res["candidate"]
+                status = "accepted"
+                reason = ""
+                first_source = "ai_rescue"
+                if rescue_res.get("number") and not num_val:
+                    num_val = rescue_res["number"]
+                    fields_dict["number"] = {"value": num_val, "confidence": "high"}
+                if rescue_res.get("title") and not title_val:
+                    title_val = rescue_res["title"]
+                    fields_dict["title"] = {"value": title_val, "confidence": "high"}
+                if rescue_res.get("issue_date") and not iss_val:
+                    try:
+                        iss_val = date.fromisoformat(rescue_res["issue_date"])
+                        fields_dict["issue_date"] = {"value": rescue_res["issue_date"], "confidence": "high"}
+                    except Exception:
+                        pass
+                if rescue_res.get("expiry_date") and not exp_val:
+                    try:
+                        exp_val = date.fromisoformat(rescue_res["expiry_date"])
+                        fields_dict["expiry_date"] = {"value": rescue_res["expiry_date"], "confidence": "high"}
+                    except Exception:
+                        pass
 
         if status == "accepted" and cand is not None:
             matched_emp = employees[cand.index]
