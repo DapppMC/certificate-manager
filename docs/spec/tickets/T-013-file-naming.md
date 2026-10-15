@@ -4,7 +4,7 @@ id: T-013
 date: 2026-10-15
 tags: [ticket]
 when: Adds naming.py: {NID}_{Nama}_{Judul}_{Tahun}.pdf, renewal suffix, illegal characters, aliases, path budget, _dup counter.
-status: todo
+status: done
 owner: executor
 kind: feature
 phase: 1
@@ -96,6 +96,24 @@ Append to the "Execution report" section below (this format is mandatory and is 
 - Never say done until the verification commands ran in this session and their exit codes and final lines are pasted.
 
 ## Execution report
-Status: not started.
+Status: done.
+- Ticket: T-013, status: done
+- Files changed:
+  - `src/certslice/naming.py` (created)
+  - `src/certslice/pipeline.py` (modified)
+  - `tests/unit/test_naming.py` (created)
+- Commands run:
+  - `.\.venv\Scripts\python.exe scripts/run_check.py --name t013 --fail-on "no tests ran" -- python scripts/stage_tests.py --upto T-013`:
+    EXIT=0
+    RESULT: PASS
+  - `.\.venv\Scripts\python.exe scripts/run_check.py --name secrets -- python scripts/scan_secrets.py`:
+    EXIT=0
+    RESULT: PASS
+- Acceptance criteria:
+  - AC1: pass (`bundle_simple.pdf` gives exactly the three standard names)
+  - AC2: pass (Long title, duplicates, renewal and accented name pass; every path is at most 250 characters)
+  - AC3: pass (Alias CSV given through `--config` changes the title in names; a 240-character `--out` exits 2)
+- Deviations from the plan: none
+- Open issues and questions for the planner: none
 
 Related: [requirements](../01-requirements.md), [verification](../04-verification.md), [tickets index](INDEX.md)

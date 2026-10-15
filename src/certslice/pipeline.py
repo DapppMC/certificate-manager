@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import re
 
-from certslice.config import load_config
+from certslice.config import fold_text, load_aliases, load_config
 from certslice.database import load_employees
 from certslice.errors import InputError
 from certslice.expiry import apply_rules
@@ -21,6 +21,7 @@ from certslice.fields import (
 )
 from certslice.grouping import PageInfo, check_accounting, group_pages
 from certslice.matcher import cue_filter, decide, page_candidates, template_employees
+from certslice.naming import NameBuilder
 from certslice.normalize import fold
 from certslice.reader import LocalPageReader, open_pdf
 import pymupdf
@@ -190,7 +191,6 @@ def run(
 
         if status == "accepted" and cand is not None:
             matched_emp = employees[cand.index]
-            file_name = f"{matched_emp.nid}_{matched_emp.nama}.pdf"
             group_entry = {
                 "id": grp_id,
                 "pages": grp_pages,
@@ -204,7 +204,7 @@ def run(
                 "fields": fields_dict,
                 "expiry_source": expiry_source,
                 "renewal": ren_val,
-                "file_name": file_name,
+                "file_name": None,
             }
         else:
             group_entry = {
@@ -223,6 +223,33 @@ def run(
                 "file_name": None,
             }
         groups.append(group_entry)
+
+    # (e.2) Apply aliases and standard file naming before creating output folder
+    aliases = load_aliases(cfg)
+    builder = NameBuilder(out_path, cfg)
+    unknown_title = cfg.get("naming", {}).get("unknown_title", "Tanpa Judul")
+    unknown_year = cfg.get("naming", {}).get("unknown_year", "0000")
+
+    for grp in groups:
+        raw_title = grp["fields"]["title"]["value"]
+        if raw_title is not None:
+            judul = aliases.get(fold_text(raw_title), raw_title)
+        else:
+            judul = unknown_title
+        grp["fields"]["title"]["value"] = judul
+
+        if grp["status"] == "accepted":
+            iss_str = grp["fields"]["issue_date"]["value"]
+            tahun = iss_str.split("-")[0] if iss_str else unknown_year
+            grp["file_name"] = builder.build(
+                grp["nid"],
+                grp["nama"],
+                judul,
+                tahun,
+                grp["renewal"],
+            )
+        else:
+            grp["file_name"] = None
 
     # (f) Create run folder
     out_path.mkdir(parents=True, exist_ok=True)
