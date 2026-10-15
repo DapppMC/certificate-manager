@@ -26,10 +26,13 @@ def load_user_settings() -> dict[str, Any]:
     return {"gemini_api_key": "", "use_ai": False, "model": "gemini-2.5-flash"}
 
 
-def save_user_settings(settings: dict[str, Any]) -> None:
+def save_user_settings(settings: dict[str, Any] | None = None, **kwargs: Any) -> None:
     try:
         current = load_user_settings()
-        current.update(settings)
+        if settings and isinstance(settings, dict):
+            current.update(settings)
+        if kwargs:
+            current.update(kwargs)
         SETTINGS_FILE.write_text(json.dumps(current, indent=2), encoding="utf-8")
     except Exception as exc:
         logger.warning("Could not save settings to %s: %s", SETTINGS_FILE, exc)

@@ -764,10 +764,15 @@ class CertSliceApp(tk.Tk):
         ttk.Label(card_faq, text=faq_text, justify="left", wraplength=760, background="#FFFFFF").pack(anchor="w")
 
     def _setup_logging(self) -> None:
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO)
         handler = TextHandler(self.log_text)
         handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
+
+        cert_logger = logging.getLogger("certslice")
+        cert_logger.setLevel(logging.INFO)
+        cert_logger.addHandler(handler)
+
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO)
         root_logger.addHandler(handler)
 
     def _toggle_show_key(self) -> None:
@@ -837,37 +842,52 @@ class CertSliceApp(tk.Tk):
     # BACKGROUND WORKER
     # =========================================================================
     def _start_processing(self) -> None:
-        pdf_file = Path(self.pdf_var.get().strip())
-        db_file = Path(self.db_var.get().strip())
-        out_dir = Path(self.out_var.get().strip())
+        try:
+            pdf_str = self.pdf_var.get().strip()
+            db_str = self.db_var.get().strip()
+            out_str = self.out_var.get().strip()
 
-        if not pdf_file.exists() or not pdf_file.is_file():
-            messagebox.showerror("Error", "File PDF bundel sertifikat tidak ditemukan. Silakan pilih file yang valid.")
-            return
+            if not pdf_str:
+                messagebox.showwarning("Peringatan", "Silakan pilih file PDF bundel sertifikat terlebih dahulu.")
+                return
 
-        if not db_file.exists() or not db_file.is_file():
-            messagebox.showerror("Error", "File database Excel tidak ditemukan. Silakan pilih file yang valid.")
-            return
+            if not db_str:
+                messagebox.showwarning("Peringatan", "Silakan pilih file database master Excel terlebih dahulu.")
+                return
 
-        # Generate human-friendly folder name
-        run_name = make_human_friendly_run_name(pdf_file)
+            pdf_file = Path(pdf_str)
+            db_file = Path(db_str)
+            out_dir = Path(out_str)
 
-        # Save settings
-        save_user_settings(
-            gemini_api_key=self.api_key_var.get().strip(),
-            gemini_model=self.model_var.get().strip(),
-            use_ai=self.ai_var.get(),
-            default_db_path=str(db_file),
-            default_out_path=str(out_dir),
-        )
+            if not pdf_file.exists() or not pdf_file.is_file():
+                messagebox.showerror("Error", f"File PDF bundel sertifikat tidak ditemukan:\n{pdf_str}")
+                return
 
-        self.btn_run.configure(state="disabled")
-        self.btn_open_out.configure(state="disabled")
-        self.btn_review.configure(state="disabled")
-        self.progress_bar.pack(side="left", padx=12)
-        self.progress_bar.start(10)
+            if not db_file.exists() or not db_file.is_file():
+                messagebox.showerror("Error", f"File database Excel tidak ditemukan:\n{db_str}")
+                return
 
-        threading.Thread(target=self._run_pipeline_worker, args=(pdf_file, db_file, out_dir, run_name), daemon=True).start()
+            # Generate human-friendly folder name
+            run_name = make_human_friendly_run_name(pdf_file)
+
+            # Save settings
+            save_user_settings(
+                gemini_api_key=self.api_key_var.get().strip(),
+                gemini_model=self.model_var.get().strip(),
+                use_ai=self.ai_var.get(),
+                default_db_path=str(db_file),
+                default_out_path=str(out_dir),
+            )
+
+            self.btn_run.configure(state="disabled")
+            self.btn_open_out.configure(state="disabled")
+            self.btn_review.configure(state="disabled")
+            self.progress_bar.pack(side="left", padx=12)
+            self.progress_bar.start(10)
+
+            threading.Thread(target=self._run_pipeline_worker, args=(pdf_file, db_file, out_dir, run_name), daemon=True).start()
+        except Exception as e:
+            messagebox.showerror("Error", f"Gagal memulai proses:\n{e}")
 
     def _run_pipeline_worker(self, pdf_file: Path, db_file: Path, out_dir: Path, run_name: str) -> None:
         pages_mode = self.pages_mode_var.get()
