@@ -9,7 +9,7 @@ import re
 from certslice.config import load_config
 from certslice.database import load_employees
 from certslice.errors import InputError
-from certslice.matcher import decide, page_candidates
+from certslice.matcher import cue_filter, decide, page_candidates, template_employees
 from certslice.reader import LocalPageReader, open_pdf
 import pymupdf
 
@@ -57,19 +57,38 @@ def run(
     rdr = reader or LocalPageReader(cfg, ocr)
 
     num_pages = doc.page_count
+
+    all_page_pts = []
+    all_page_lines = []
+    all_page_raw_cands = []
+
+    for page_idx in range(num_pages):
+        page = doc[page_idx]
+        pt = rdr.read(page)
+        lines = [line for line in pt.text.splitlines() if line.strip()]
+        cands = page_candidates(lines, employees, cfg)
+        all_page_pts.append(pt)
+        all_page_lines.append(lines)
+        all_page_raw_cands.append(cands)
+
+    template_indices = template_employees(all_page_raw_cands, num_pages, cfg)
+    template_names = sorted(employees[i].nama for i in template_indices)
+
     page_records = []
     groups = []
 
     # (d) & (e) Simple match and grouping
     for page_idx in range(num_pages):
         page_num = page_idx + 1
-        page = doc[page_idx]
-
-        pt = rdr.read(page)
-        lines = [line for line in pt.text.splitlines() if line.strip()]
+        pt = all_page_pts[page_idx]
+        lines = all_page_lines[page_idx]
         source = pt.source
 
-        cands = page_candidates(lines, employees, cfg)
+        # Remove template employees
+        cands = [c for c in all_page_raw_cands[page_idx] if c.index not in template_indices]
+        # Apply cue filter
+        cands = cue_filter(cands, lines, cfg)
+
         status, top, reason = decide(cands, employees, cfg)
 
         cand_page = []
@@ -169,7 +188,7 @@ def run(
         "page_count": num_pages,
         "dry_run": dry_run,
         "pages_per_cert": pages_per_cert,
-        "template_names": [],
+        "template_names": template_names,
         "pages": page_records,
         "groups": groups,
         "timings": {

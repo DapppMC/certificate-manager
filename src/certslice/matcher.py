@@ -1,9 +1,54 @@
-from __future__ import annotations
+import math
+import re
 
 from rapidfuzz import fuzz
 
 from certslice.models import Candidate, Employee
-from certslice.normalize import name_tokens
+from certslice.normalize import fold, name_tokens
+
+
+def template_employees(per_page: list[list[Candidate]], n_pages: int, cfg: dict) -> set[int]:
+    m = cfg["matching"]
+    counts: dict[int, int] = {}
+    for cands in per_page:
+        for c in cands:
+            if c.score >= m["list_score"]:
+                counts[c.index] = counts.get(c.index, 0) + 1
+    need = max(m["template_min_pages"], math.ceil(m["template_min_share"] * n_pages))
+    return {i for i, count in counts.items() if count >= need}
+
+
+def cue_filter(cands: list[Candidate], lines: list[str], cfg: dict) -> list[Candidate]:
+    m = cfg["matching"]
+    accept_score = float(m["accept_score"])
+    cue_window_lines = int(m.get("cue_window_lines", 3))
+    holder_cues = m.get("holder_cues", [])
+
+    folded_lines = [fold(l) for l in lines]
+    cue_line_indices: list[int] = []
+    for idx, fl in enumerate(folded_lines):
+        for cue in holder_cues:
+            pattern = r"(?<![a-z0-9])" + re.escape(fold(cue)) + r"(?![a-z0-9])"
+            if re.search(pattern, fl):
+                cue_line_indices.append(idx)
+                break
+
+    if not cue_line_indices:
+        res = list(cands)
+        res.sort(key=lambda c: (-c.score, c.index))
+        return res
+
+    def in_window(line_idx: int) -> bool:
+        return any(c_idx <= line_idx <= c_idx + cue_window_lines for c_idx in cue_line_indices)
+
+    has_confident_near_cue = any(c.score >= accept_score and in_window(c.line) for c in cands)
+    if has_confident_near_cue:
+        res = [c for c in cands if in_window(c.line)]
+    else:
+        res = list(cands)
+
+    res.sort(key=lambda c: (-c.score, c.index))
+    return res
 
 
 def partial_cover(emp_tokens: list[str], line_tokens: list[str]) -> bool:

@@ -4,7 +4,7 @@ id: T-008
 date: 2026-10-15
 tags: [ticket]
 when: Adds the bundle-level template-name exclusion and the per-page holder cue filter before the decision.
-status: todo
+status: done
 owner: executor
 kind: feature
 phase: 1
@@ -107,6 +107,30 @@ Append to the "Execution report" section below (this format is mandatory and is 
 - Never say done until the verification commands ran in this session and their exit codes and final lines are pasted.
 
 ## Execution report
-Status: not started.
+Status: done.
+
+Files changed:
+- `src/certslice/matcher.py` (modified)
+- `src/certslice/pipeline.py` (modified)
+- `tests/unit/test_matcher_filters.py` (created)
+- `docs/spec/tickets/T-008-signatory-filter.md` (modified)
+
+Commands run:
+- `.\.venv\Scripts\python.exe -m pytest tests/unit/test_matcher_filters.py`:
+  EXIT=1 (confirmed failed before `template_employees` and `cue_filter` existed with `ImportError: cannot import name 'cue_filter'`)
+- `.\.venv\Scripts\python.exe scripts/run_check.py --name t008 --fail-on "no tests ran" -- python scripts/stage_tests.py --upto T-008`:
+  EXIT=0
+  RESULT: PASS
+- `.\.venv\Scripts\python.exe scripts/run_check.py --name secrets -- python scripts/scan_secrets.py`:
+  EXIT=0
+  RESULT: PASS
+
+Acceptance criteria:
+- AC1: `bundle_signatory.pdf`: 10 groups, all accepted, none with NID 0099001, and `Agus Prasetyo` in `template_names`: PASS (verified via `test_director_on_every_page_is_never_the_holder`).
+- AC2: `bundle_bnsp_like.pdf`: `Muhammad Alfi` is a template name and not accepted: PASS (verified via `test_signatory_close_to_an_employee_name_is_template`).
+- AC3: All earlier acceptance tests still pass: PASS (58/58 tests passed).
+
+Deviations from the plan: none.
+Open issues and questions for the planner: none.
 
 Related: [requirements](../01-requirements.md), [verification](../04-verification.md), [tickets index](INDEX.md)
