@@ -4,7 +4,7 @@ id: T-014
 date: 2026-10-15
 tags: [ticket]
 when: Adds writer.py output for manifest_slice.xlsx (10 columns) and unmatched_report.xlsx (unmatched, needs_review).
-status: todo
+status: done
 owner: executor
 kind: feature
 phase: 1
@@ -94,6 +94,24 @@ Append to the "Execution report" section below (this format is mandatory and is 
 - Never say done until the verification commands ran in this session and their exit codes and final lines are pasted.
 
 ## Execution report
-Status: not started.
+Status: done.
+- Ticket: T-014, status: done
+- Files changed:
+  - `src/certslice/writer.py` (created)
+  - `src/certslice/pipeline.py` (modified)
+  - `tests/unit/test_writer.py` (created)
+- Commands run:
+  - `.\.venv\Scripts\python.exe scripts/run_check.py --name t014 --fail-on "no tests ran" -- python scripts/stage_tests.py --upto T-014`:
+    EXIT=0
+    RESULT: PASS
+  - `.\.venv\Scripts\python.exe scripts/run_check.py --name secrets -- python scripts/scan_secrets.py`:
+    EXIT=0
+    RESULT: PASS
+- Acceptance criteria:
+  - AC1: pass (`manifest_slice.xlsx` of `bundle_simple.pdf` has the 10 headers and row 1 values, NIDs as text)
+  - AC2: pass (`unmatched_report.xlsx` of `bundle_unmatched.pdf` has rows for pages 1, 2 and 4 with reasons and candidates)
+  - AC3: pass (`bundle_mixed.pdf` page 7 appears in needs_review with `Tanggal Terbit`; file name ends `_0000.pdf`)
+- Deviations from the plan: none
+- Open issues and questions for the planner: none
 
 Related: [requirements](../01-requirements.md), [verification](../04-verification.md), [tickets index](INDEX.md)

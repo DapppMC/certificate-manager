@@ -24,6 +24,7 @@ from certslice.matcher import cue_filter, decide, page_candidates, template_empl
 from certslice.naming import NameBuilder
 from certslice.normalize import fold
 from certslice.reader import LocalPageReader, open_pdf
+from certslice.writer import write_workbooks
 import pymupdf
 
 
@@ -189,6 +190,8 @@ def run(
             "doc_type": {"value": type_val, "confidence": type_conf},
         }
 
+        first_source = all_page_pts[first_p - 1].source
+
         if status == "accepted" and cand is not None:
             matched_emp = employees[cand.index]
             group_entry = {
@@ -205,6 +208,7 @@ def run(
                 "expiry_source": expiry_source,
                 "renewal": ren_val,
                 "file_name": None,
+                "source": first_source,
             }
         else:
             group_entry = {
@@ -221,6 +225,7 @@ def run(
                 "expiry_source": expiry_source,
                 "renewal": ren_val,
                 "file_name": None,
+                "source": first_source,
             }
         groups.append(group_entry)
 
@@ -261,7 +266,7 @@ def run(
         counter += 1
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # (g) Write PDFs unless dry_run
+    # (g) Write PDFs and workbooks unless dry_run
     if not dry_run:
         pdf_dir = run_dir / "pdf"
         pdf_dir.mkdir(parents=True, exist_ok=True)
@@ -273,6 +278,8 @@ def run(
                 new_doc.insert_pdf(doc, from_page=first_idx, to_page=last_idx)
                 new_doc.save(pdf_dir / grp["file_name"])
                 new_doc.close()
+
+        write_workbooks(run_dir, groups, cfg)
 
     doc.close()
 
