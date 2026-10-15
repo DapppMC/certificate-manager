@@ -4,7 +4,7 @@ id: T-006
 date: 2026-10-15
 tags: [ticket]
 when: Replaces the skeleton match with fuzzy reverse lookup per line and the four-step accept rule.
-status: todo
+status: done
 owner: executor
 kind: feature
 phase: 1
@@ -110,6 +110,32 @@ Append to the "Execution report" section below (this format is mandatory and is 
 - Never say done until the verification commands ran in this session and their exit codes and final lines are pasted.
 
 ## Execution report
-Status: not started.
+Status: done.
+
+Files changed:
+- `src/certslice/matcher.py` (created)
+- `src/certslice/pipeline.py` (modified)
+- `tests/unit/test_matcher.py` (created)
+- `docs/spec/tickets/T-006-candidate-matching.md` (modified)
+
+Commands run:
+- `.\.venv\Scripts\python.exe -m pytest tests/unit/test_matcher.py`:
+  EXIT=1 (confirmed failed before `certslice.matcher` existed with `ModuleNotFoundError: No module named 'certslice.matcher'`)
+- `Measure-Command { .\.venv\Scripts\python.exe -m certslice run --pdf tests/fixtures/bundle_30.pdf --db tests/fixtures/db_basic.xlsx --out out --no-ocr --dry-run }`:
+  TotalSeconds = 1.144s
+- `.\.venv\Scripts\python.exe scripts/run_check.py --name t006 --fail-on "no tests ran" -- python scripts/stage_tests.py --upto T-006`:
+  EXIT=0
+  RESULT: PASS
+- `.\.venv\Scripts\python.exe scripts/run_check.py --name secrets -- python scripts/scan_secrets.py`:
+  EXIT=0
+  RESULT: PASS
+
+Acceptance criteria:
+- AC1: `Ir. BUDI SANTOSO, S.T., M.M.` matches NID 007123 with score of at least 92: PASS (verified via `test_titles_and_case_do_not_block_a_match`).
+- AC2: `bundle_unmatched.pdf`: page 1 `homonym` listing both Ahmad Fauzi NIDs and units, page 2 `no confident holder`, page 3 accepted 0033333, page 4 `close candidates`: PASS (verified via `test_homonym_and_stranger_are_not_accepted`).
+- AC3: Every accepted group's first candidate is its NID and leads the next by at least 5 points: PASS (verified via `test_every_accepted_group_has_a_clear_winner`).
+
+Deviations from the plan: none.
+Open issues and questions for the planner: none.
 
 Related: [requirements](../01-requirements.md), [verification](../04-verification.md), [tickets index](INDEX.md)

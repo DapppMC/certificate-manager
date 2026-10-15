@@ -9,6 +9,7 @@ import re
 from certslice.config import load_config
 from certslice.database import load_employees
 from certslice.errors import InputError
+from certslice.matcher import decide, page_candidates
 from certslice.reader import LocalPageReader, open_pdf
 import pymupdf
 
@@ -68,32 +69,30 @@ def run(
         lines = [line for line in pt.text.splitlines() if line.strip()]
         source = pt.source
 
-        folded_page = " " + _fold_text(pt.text) + " "
+        cands = page_candidates(lines, employees, cfg)
+        status, top, reason = decide(cands, employees, cfg)
 
-        matched_employees = []
-        for emp in employees:
-            folded_name = " " + _fold_text(emp.nama) + " "
-            if folded_name in folded_page:
-                matched_employees.append(emp)
+        cand_page = [
+            {
+                "nid": employees[c.index].nid,
+                "nama": employees[c.index].nama,
+                "score": round(c.score, 1),
+            }
+            for c in cands[:3]
+        ]
+        cand_group = [
+            {
+                "nid": employees[c.index].nid,
+                "nama": employees[c.index].nama,
+                "unit": employees[c.index].unit,
+                "score": round(c.score, 1),
+            }
+            for c in cands[:3]
+        ]
 
-        distinct_nids = {emp.nid for emp in matched_employees}
-
-        if len(distinct_nids) == 1:
-            matched_emp = matched_employees[0]
-            status = "accepted"
-            reason = ""
+        if status == "accepted" and top is not None:
+            matched_emp = employees[top.index]
             file_name = f"{matched_emp.nid}_{matched_emp.nama}.pdf"
-            cand_page = [{
-                "nid": matched_emp.nid,
-                "nama": matched_emp.nama,
-                "score": 100.0,
-            }]
-            cand_group = [{
-                "nid": matched_emp.nid,
-                "nama": matched_emp.nama,
-                "unit": matched_emp.unit,
-                "score": 100.0,
-            }]
             group_entry = {
                 "id": page_num,
                 "pages": [page_num],
@@ -110,9 +109,6 @@ def run(
                 "file_name": file_name,
             }
         else:
-            status = "unmatched"
-            reason = "no confident holder"
-            cand_page = []
             group_entry = {
                 "id": page_num,
                 "pages": [page_num],
@@ -122,7 +118,7 @@ def run(
                 "nama": None,
                 "email": None,
                 "unit": None,
-                "candidates": [],
+                "candidates": cand_group,
                 "fields": {},
                 "expiry_source": None,
                 "renewal": None,
