@@ -9,7 +9,15 @@ import re
 from certslice.config import load_config
 from certslice.database import load_employees
 from certslice.errors import InputError
-from certslice.fields import extract_dates, extract_number
+from certslice.fields import (
+    doc_type,
+    extract_dates,
+    extract_issuer,
+    extract_number,
+    extract_title,
+    renewal_number,
+    template_lines,
+)
 from certslice.grouping import PageInfo, check_accounting, group_pages
 from certslice.matcher import cue_filter, decide, page_candidates, template_employees
 from certslice.normalize import fold
@@ -126,6 +134,8 @@ def run(
     raw_groups = group_pages(page_infos, employees, pages_per_cert, cfg)
     check_accounting(raw_groups, num_pages)
 
+    tmpl_lines = template_lines(all_page_lines, cfg)
+
     groups = []
     for grp_idx, rg in enumerate(raw_groups):
         grp_id = grp_idx + 1
@@ -137,6 +147,8 @@ def run(
         group_lines = []
         for p in grp_pages:
             group_lines.extend(all_page_lines[p - 1])
+
+        group_is_bundle = (len(grp_pages) == num_pages)
 
         status = rg["status"]
         reason = rg["reason"]
@@ -158,10 +170,18 @@ def run(
         num_val = extract_number(first_page_lines, cfg)
         num_conf = "high" if num_val is not None else "low"
         iss_val, iss_conf, exp_val, exp_conf = extract_dates(group_lines, cfg)
+        title_val, title_conf = extract_title(first_page_lines, tmpl_lines, group_is_bundle, num_pages, cfg)
+        issuer_val, issuer_conf = extract_issuer(group_lines, tmpl_lines, cfg)
+        type_val, type_conf = doc_type(title_val, group_lines, cfg)
+        ren_val = renewal_number(group_lines, cfg)
+
         fields_dict = {
             "number": {"value": num_val, "confidence": num_conf},
             "issue_date": {"value": iss_val.isoformat() if iss_val else None, "confidence": iss_conf},
             "expiry_date": {"value": exp_val.isoformat() if exp_val else None, "confidence": exp_conf},
+            "title": {"value": title_val, "confidence": title_conf},
+            "issuer": {"value": issuer_val, "confidence": issuer_conf},
+            "doc_type": {"value": type_val, "confidence": type_conf},
         }
         expiry_source = "printed" if exp_val else None
 
@@ -180,7 +200,7 @@ def run(
                 "candidates": cand_group,
                 "fields": fields_dict,
                 "expiry_source": expiry_source,
-                "renewal": None,
+                "renewal": ren_val,
                 "file_name": file_name,
             }
         else:
@@ -196,7 +216,7 @@ def run(
                 "candidates": cand_group,
                 "fields": fields_dict,
                 "expiry_source": expiry_source,
-                "renewal": None,
+                "renewal": ren_val,
                 "file_name": None,
             }
         groups.append(group_entry)

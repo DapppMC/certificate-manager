@@ -233,3 +233,166 @@ def extract_dates(lines: list[str], cfg: dict) -> tuple[dt.date | None, str, dt.
         issue_conf = "low"
 
     return issue_date, issue_conf, expiry_date, expiry_conf
+
+
+def template_lines(pages_lines: list[list[str]], cfg: dict) -> set[str]:
+    n_pages = len(pages_lines)
+    if n_pages < 3:
+        return set()
+
+    share_threshold = cfg.get("fields", {}).get("template_line_share", 0.6)
+    min_pages = share_threshold * n_pages
+
+    counts: dict[str, int] = {}
+    for page_lines in pages_lines:
+        seen_on_page: set[str] = set()
+        for line in page_lines:
+            collapsed = " ".join(fold(line).split())
+            if collapsed:
+                seen_on_page.add(collapsed)
+        for line_key in seen_on_page:
+            counts[line_key] = counts.get(line_key, 0) + 1
+
+    return {k for k, count in counts.items() if count >= min_pages}
+
+
+def extract_title(
+    first_lines: list[str],
+    template: set[str],
+    group_is_bundle: bool,
+    n_pages: int,
+    cfg: dict,
+) -> tuple[str | None, str]:
+    f_cfg = cfg.get("fields", {})
+    title_cues = sorted(f_cfg.get("title_cues", []), key=len, reverse=True)
+    title_generic = set(fold(g) for g in f_cfg.get("title_generic", []))
+    title_keywords = f_cfg.get("title_keywords", [])
+
+    found_title: str | None = None
+    confidence: str = "low"
+
+    # Search for cues
+    for i, line in enumerate(first_lines):
+        folded_line = fold(line)
+        matched_cue = None
+        for cue in title_cues:
+            if fold(cue) in folded_line:
+                matched_cue = cue
+                break
+
+        if matched_cue is None:
+            continue
+
+        # Found a line with a cue
+        cue_folded = fold(matched_cue)
+        m = re.search(re.escape(matched_cue), line, re.IGNORECASE)
+        if m:
+            unstripped_rest = line[m.end():]
+        else:
+            pos = folded_line.find(cue_folded)
+            unstripped_rest = line[pos + len(cue_folded):]
+
+        stripped_rest = unstripped_rest.strip(" \t\r\n:\"'-")
+
+        if (
+            len(stripped_rest) >= 4
+            and fold(stripped_rest) not in title_generic
+            and not unstripped_rest.rstrip().endswith(":")
+        ):
+            found_title = stripped_rest
+        else:
+            for j in range(i + 1, len(first_lines)):
+                nxt_line = first_lines[j]
+                stripped_nxt = nxt_line.strip(" \t\r\n\"'-")
+                if (
+                    len(stripped_nxt) >= 4
+                    and not nxt_line.rstrip().endswith(":")
+                    and not any(fold(c) in fold(nxt_line) for c in title_cues)
+                    and fold(stripped_nxt) not in title_generic
+                ):
+                    found_title = stripped_nxt
+                    break
+
+        if found_title is not None:
+            is_tmpl = " ".join(fold(found_title).split()) in template
+            if is_tmpl or n_pages < 3 or group_is_bundle:
+                confidence = "high"
+            else:
+                confidence = "medium"
+            return found_title, confidence
+
+    # Without a cue: check title_keywords
+    for line in first_lines:
+        folded_line = fold(line)
+        stripped = line.strip(" \t\r\n\"'-")
+        if any(_phrase_match(kw, folded_line) for kw in title_keywords):
+            if fold(stripped) not in title_generic and len(stripped) >= 4:
+                found_title = stripped
+                is_tmpl = " ".join(fold(found_title).split()) in template
+                confidence = "medium" if is_tmpl else "low"
+                return found_title, confidence
+
+    # Generic fallback
+    for line in first_lines:
+        stripped = line.strip(" \t\r\n\"'-")
+        if fold(stripped) in title_generic:
+            return stripped, "low"
+
+    return None, "low"
+
+
+def extract_issuer(
+    group_lines: list[str],
+    template: set[str],
+    cfg: dict,
+) -> tuple[str | None, str]:
+    f_cfg = cfg.get("fields", {})
+    issuer_keywords = f_cfg.get("issuer_keywords", [])
+    issuer_exclude = f_cfg.get("issuer_exclude", [])
+    issuer_join_next = set(fold(x) for x in f_cfg.get("issuer_join_next", []))
+
+    for kw in issuer_keywords:
+        kw_folded = fold(kw)
+        for idx, line in enumerate(group_lines):
+            line_folded = fold(line)
+            line_folded_spaced = line_folded + " "
+            if kw_folded in line_folded_spaced:
+                if any(fold(ex) in line_folded for ex in issuer_exclude):
+                    continue
+                issuer = line.strip()
+                if fold(issuer) in issuer_join_next and idx + 1 < len(group_lines):
+                    issuer = f"{issuer} {group_lines[idx + 1].strip()}"
+
+                is_tmpl = (
+                    " ".join(fold(line).split()) in template
+                    or " ".join(fold(issuer).split()) in template
+                )
+                conf = "high" if is_tmpl else "medium"
+                return issuer, conf
+
+    return None, "low"
+
+
+def doc_type(title: str | None, group_lines: list[str], cfg: dict) -> tuple[str, str]:
+    f_cfg = cfg.get("fields", {})
+    training_words = f_cfg.get("training_words", [])
+    certification_words = f_cfg.get("certification_words", [])
+
+    title_text = fold(title or "")
+    group_text = " ".join(fold(line) for line in group_lines)
+
+    if any(_phrase_match(w, title_text) or _phrase_match(w, group_text) for w in training_words):
+        return "Pelatihan", "medium"
+    if any(_phrase_match(w, title_text) or _phrase_match(w, group_text) for w in certification_words):
+        return "Sertifikasi", "medium"
+    return "Sertifikasi", "low"
+
+
+def renewal_number(group_lines: list[str], cfg: dict) -> int | None:
+    pattern = cfg.get("fields", {}).get("renewal_pattern", r"perpanjangan(?:\s+ke)?[\s\-]*(\d+)")
+    group_text = " ".join(fold(line) for line in group_lines)
+    m = re.search(pattern, group_text, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    return None
+
