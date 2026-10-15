@@ -119,6 +119,14 @@ def approve_group(
         new_doc.close()
         doc.close()
 
+        # Remove old [REVIEW]_ temp file if present
+        old_rev = target_grp.get("review_file_name")
+        if old_rev and (pdf_dir / old_rev).exists():
+            try:
+                (pdf_dir / old_rev).unlink()
+            except Exception:
+                pass
+
     # Update group record in plan
     target_grp["status"] = "accepted"
     target_grp["reason"] = ""
@@ -139,5 +147,13 @@ def approve_group(
 
     # Re-generate workbooks
     write_workbooks(run_dir, groups, cfg)
+
+    # Sync to data.xlsx
+    if (run_dir / "manifest_slice.xlsx").exists():
+        try:
+            import shutil
+            shutil.copy2(run_dir / "manifest_slice.xlsx", run_dir / "data.xlsx")
+        except Exception:
+            pass
 
     return file_name

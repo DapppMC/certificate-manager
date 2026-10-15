@@ -24,7 +24,7 @@ from certslice.fields import (
 )
 from certslice.grouping import PageInfo, check_accounting, group_pages
 from certslice.matcher import cue_filter, decide, page_candidates, template_employees
-from certslice.naming import NameBuilder
+from certslice.naming import NameBuilder, clean_field
 from certslice.normalize import fold
 from certslice.reader import LocalPageReader, open_pdf
 from certslice.writer import write_workbooks
@@ -41,18 +41,23 @@ class RunResult:
 
 
 def run(
-    pdf_path,
-    db_path,
-    out_dir,
+    pdf_path=None,
+    db_path=None,
+    out_dir=None,
     *,
+    pdf_file=None,
+    db_file=None,
+    out_path=None,
     dry_run=False,
     pages_per_cert="auto",
     ocr=True,
+    ocr_enabled=None,
     config_path=None,
     reader=None,
     use_ai=False,
     gemini_api_key=None,
     gemini_model="gemini-2.5-flash",
+    run_name=None,
 ) -> RunResult:
     t0 = time.perf_counter()
     cfg = load_config(config_path)
@@ -61,9 +66,11 @@ def run(
         gemini_api_key = settings.get("gemini_api_key")
         if not use_ai and settings.get("use_ai"):
             use_ai = True
-    pdf_file = Path(pdf_path)
-    db_file = Path(db_path)
-    out_path = Path(out_dir)
+    if ocr_enabled is not None:
+        ocr = ocr_enabled
+    pdf_file = Path(pdf_path or pdf_file)
+    db_file = Path(db_path or db_file)
+    out_path = Path(out_dir or out_path)
 
     # (a) Database validation
     employees = load_employees(db_file, cfg)
@@ -359,7 +366,10 @@ def run(
 
     # (f) Create run folder
     out_path.mkdir(parents=True, exist_ok=True)
-    base_name = f"run-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    if run_name:
+        base_name = run_name
+    else:
+        base_name = f"run-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     run_dir = out_path / base_name
     counter = 2
     while run_dir.exists():
@@ -372,13 +382,20 @@ def run(
         pdf_dir = run_dir / "pdf"
         pdf_dir.mkdir(parents=True, exist_ok=True)
         for grp in groups:
+            first_idx = grp["pages"][0] - 1
+            last_idx = grp["pages"][-1] - 1
+            new_doc = pymupdf.open()
+            new_doc.insert_pdf(doc, from_page=first_idx, to_page=last_idx)
             if grp["status"] == "accepted":
-                first_idx = grp["pages"][0] - 1
-                last_idx = grp["pages"][-1] - 1
-                new_doc = pymupdf.open()
-                new_doc.insert_pdf(doc, from_page=first_idx, to_page=last_idx)
                 new_doc.save(pdf_dir / grp["file_name"])
-                new_doc.close()
+            else:
+                cands = grp.get("candidates", [])
+                cand_str = f"_{cands[0]['nid']}_{clean_field(cands[0]['nama'])}" if cands else ""
+                pg_str = f"Hal{grp['pages'][0]}" if len(grp["pages"]) == 1 else f"Hal{grp['pages'][0]}-{grp['pages'][-1]}"
+                review_fname = f"[REVIEW]_{pg_str}{cand_str}.pdf"
+                grp["review_file_name"] = review_fname
+                new_doc.save(pdf_dir / review_fname)
+            new_doc.close()
 
         write_workbooks(run_dir, groups, cfg)
         logger.info("wrote outputs to %s", run_dir)

@@ -127,7 +127,11 @@ def page_candidates(lines: list[str], employees: list[Employee], cfg: dict) -> l
             is_partial = False
             if k < min_tokens_fuzzy:
                 if emp_norm in toks:
-                    line_best = 100.0
+                    if len(toks) == 1:
+                        line_best = 100.0
+                    else:
+                        line_best = partial_score
+                        is_partial = True
                 else:
                     line_best = 0.0
             else:
