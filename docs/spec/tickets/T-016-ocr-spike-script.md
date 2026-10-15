@@ -4,7 +4,7 @@ id: T-016
 date: 2026-10-15
 tags: [ticket]
 when: A small script that OCRs chosen pages of any PDF with RapidOCR and prints text, scores and seconds, for T-017.
-status: todo
+status: done
 owner: executor
 kind: feature
 phase: 1
@@ -85,6 +85,44 @@ Append to the "Execution report" section below (this format is mandatory and is 
 - Never say done until the verification commands ran in this session and their exit codes and final lines are pasted.
 
 ## Execution report
-Status: not started.
+- Ticket: T-016
+- Status: done
+- Files changed:
+  - `spikes/ocr_spike.py` (created)
+  - `docs/spec/tickets/T-016-ocr-spike-script.md` (modified)
+- Commands run:
+  - `.\.venv\Scripts\python.exe scripts/run_check.py --name t015 --require "MUHAMMAD RIZKY PRATAMA" -- python spikes/ocr_spike.py --pdf tests/fixtures/bundle_scan.pdf --pages 1`
+    ```
+    engine_init_seconds=0.008
+    PAGE 1 seconds=1.408
+    0.985  SERTIFIKAT KOMPETENSI
+    0.998  Nomor: 601/LSP-PLN/XII/2025
+    0.993  LEMBAGA SERTIFIKASI PROFESI PLN
+    0.992  Diberikan kepada:
+    0.998  MUHAMMAD RIZKY PRATAMA
+    1.000  Telah dinyatakan KOMPETEN pada skema:
+    0.998  Teknisi Distribusi Tenaga Listrik
+    0.999  Jakarta, 5 Desember 2025
+    0.994  Berlaku s.d. 4 Desember 2028
+    0.999  Ketua LSP,
+    0.998  Ir. Hartono Wibisono, M.T.
+    RESULT: PASS
+    [run_check] full output: .check-logs\t015.log
+    EXIT=0
+    RESULT: PASS
+    ```
+  - `.\.venv\Scripts\python.exe scripts/run_check.py --name secrets -- python scripts/scan_secrets.py`
+    ```
+    scanned 167 file(s); findings=0
+    RESULT: PASS
+    [run_check] full output: .check-logs\secrets.log
+    EXIT=0
+    RESULT: PASS
+    ```
+- Acceptance criteria:
+  - AC1 (On `tests/fixtures/bundle_scan.pdf` page 1 output contains `MUHAMMAD RIZKY PRATAMA`): PASS - Output contains `0.998  MUHAMMAD RIZKY PRATAMA`.
+  - AC2 (Seconds per page are printed): PASS - Output contains `PAGE 1 seconds=1.408` and `engine_init_seconds=0.008`.
+- Deviations from the plan: none
+- Open issues and questions for the planner: none
 
 Related: [requirements](../01-requirements.md), [verification](../04-verification.md), [tickets index](INDEX.md)
