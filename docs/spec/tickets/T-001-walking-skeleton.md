@@ -4,7 +4,7 @@ id: T-001
 date: 2026-10-15
 tags: [ticket]
 when: First feature: the thinnest end-to-end run from one bundle and database to split PDFs and plan.json.
-status: todo
+status: done
 owner: executor
 kind: feature
 phase: 1
@@ -112,6 +112,31 @@ Append to the "Execution report" section below (this format is mandatory and is 
 - Never say done until the verification commands ran in this session and their exit codes and final lines are pasted.
 
 ## Execution report
-Status: not started.
+Status: done.
+
+Files changed:
+- `src/certslice/__init__.py` (created)
+- `src/certslice/__main__.py` (created)
+- `src/certslice/errors.py` (created)
+- `src/certslice/cli.py` (created)
+- `src/certslice/pipeline.py` (created)
+- `tests/unit/test_cli.py` (created)
+- `docs/spec/tickets/T-001-walking-skeleton.md` (modified)
+
+Commands run:
+- `.\.venv\Scripts\python.exe scripts/run_check.py --name t001 --fail-on "no tests ran" -- python scripts/stage_tests.py --upto T-001`:
+  EXIT=0
+  RESULT: PASS
+- `.\.venv\Scripts\python.exe scripts/run_check.py --name secrets -- python scripts/scan_secrets.py`:
+  EXIT=0
+  RESULT: PASS
+
+Acceptance criteria:
+- AC1: `bundle_simple.pdf` gives three PDFs whose names start with `007123_Budi Santoso`, `0045678_Siti Rahmawati` and `8812345_Dewi Lestari`: PASS (verified via `test_skeleton_writes_one_pdf_per_holder`).
+- AC2: plan.json lists pages 1 to 3 and every page in exactly one group: PASS (verified via `test_skeleton_plan_accounts_for_every_page`).
+- AC3: stdout contains `PAGES=3 ACCEPTED=3 UNMATCHED=0` and a `RUN_DIR=` line: PASS (verified via `test_skeleton_prints_summary_lines`).
+
+Deviations from the plan: none.
+Open issues and questions for the planner: none.
 
 Related: [requirements](../01-requirements.md), [verification](../04-verification.md), [tickets index](INDEX.md)

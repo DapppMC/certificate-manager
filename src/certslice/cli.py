@@ -1,0 +1,65 @@
+from __future__ import annotations
+
+import argparse
+import sys
+
+from certslice import pipeline
+from certslice.errors import AccountingError, InputError
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="certslice", description="Certificate Slicer CLI")
+    subparsers = parser.add_subparsers(dest="subcommand")
+
+    # Subcommand: run
+    run_parser = subparsers.add_parser("run", help="Split certificate PDF bundle and match holders")
+    run_parser.add_argument("--pdf", required=True, help="Path to input bundle PDF")
+    run_parser.add_argument("--db", required=True, help="Path to employee database XLSX")
+    run_parser.add_argument("--out", required=True, help="Path to output directory")
+    run_parser.add_argument("--dry-run", action="store_true", help="Perform dry run without writing split PDFs")
+    run_parser.add_argument(
+        "--pages-per-cert",
+        choices=["1", "2", "auto"],
+        default="auto",
+        help="Pages per certificate (default: auto)",
+    )
+    run_parser.add_argument("--no-ocr", action="store_true", help="Disable OCR fallback")
+    run_parser.add_argument("--config", default=None, help="Path to custom TOML config file")
+
+    # Subcommand: evaluate
+    eval_parser = subparsers.add_parser("evaluate", help="Evaluate run results against gold set")
+    eval_parser.add_argument("--run", required=True, help="Path to run folder")
+    eval_parser.add_argument("--gold", required=True, help="Path to gold.csv")
+
+    args = parser.parse_args(argv)
+
+    if args.subcommand == "evaluate":
+        sys.stderr.write("ERROR: evaluate is not implemented yet\n")
+        return 1
+
+    if args.subcommand == "run":
+        try:
+            result = pipeline.run(
+                pdf_path=args.pdf,
+                db_path=args.db,
+                out_dir=args.out,
+                dry_run=args.dry_run,
+                pages_per_cert=args.pages_per_cert,
+                ocr=not args.no_ocr,
+                config_path=args.config,
+            )
+        except InputError as e:
+            sys.stderr.write(f"ERROR: {e}\n")
+            return 2
+        except AccountingError as e:
+            sys.stderr.write(f"ERROR: {e}\n")
+            return 3
+
+        summary = result.summary
+        print(f"PAGES={summary['pages']} ACCEPTED={summary['accepted']} UNMATCHED={summary['unmatched']}")
+        if result.run_dir is not None:
+            print(f"RUN_DIR={result.run_dir.resolve()}")
+        return result.exit_code
+
+    parser.print_help(sys.stderr)
+    return 2
