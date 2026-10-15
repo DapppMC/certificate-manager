@@ -4,7 +4,7 @@ id: T-010
 date: 2026-10-15
 tags: [ticket]
 when: Adds grouping.py: 1/2-page certificates in auto mode, --pages-per-cert 1|2, reasons and the page-accounting check.
-status: todo
+status: done
 owner: executor
 kind: feature
 phase: 1
@@ -99,6 +99,24 @@ Append to the "Execution report" section below (this format is mandatory and is 
 - Never say done until the verification commands ran in this session and their exit codes and final lines are pasted.
 
 ## Execution report
-Status: not started.
+Status: done.
+- Ticket: T-010, status: done
+- Files changed:
+  - `src/certslice/grouping.py` (created)
+  - `src/certslice/pipeline.py` (modified)
+  - `tests/unit/test_grouping.py` (created)
+- Commands run:
+  - `.\.venv\Scripts\python.exe scripts/run_check.py --name t010 --fail-on "no tests ran" -- python scripts/stage_tests.py --upto T-010`:
+    EXIT=0
+    RESULT: PASS
+  - `.\.venv\Scripts\python.exe scripts/run_check.py --name secrets -- python scripts/scan_secrets.py`:
+    EXIT=0
+    RESULT: PASS
+- Acceptance criteria:
+  - AC1: pass (`bundle_mixed.pdf` auto: groups `[[1], [2, 3], [4], [5, 6], [7]]` with NIDs 007123, 0045678, 8812345, 0033333, 0044444)
+  - AC2: pass (`--pages-per-cert 1` gives 7 groups and page 3 is unmatched; `bundle_titles.pdf` gives 3 groups)
+  - AC3: pass (`check_accounting` raises `AccountingError` on lost or doubled pages)
+- Deviations from the plan: none
+- Open issues and questions for the planner: none
 
 Related: [requirements](../01-requirements.md), [verification](../04-verification.md), [tickets index](INDEX.md)

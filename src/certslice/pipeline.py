@@ -10,7 +10,9 @@ from certslice.config import load_config
 from certslice.database import load_employees
 from certslice.errors import InputError
 from certslice.fields import extract_dates, extract_number
+from certslice.grouping import PageInfo, check_accounting, group_pages
 from certslice.matcher import cue_filter, decide, page_candidates, template_employees
+from certslice.normalize import fold
 from certslice.reader import LocalPageReader, open_pdf
 import pymupdf
 
@@ -20,12 +22,6 @@ class RunResult:
     run_dir: Path | None
     exit_code: int
     summary: dict
-
-
-def _fold_text(s: str) -> str:
-    s = s.lower()
-    s = re.sub(r"[^a-z0-9]+", " ", s)
-    return " ".join(s.split())
 
 
 def run(
@@ -44,20 +40,18 @@ def run(
     db_file = Path(db_path)
     out_path = Path(out_dir)
 
-    # (a) Check file existence
-    if not pdf_file.exists():
-        raise InputError(f"PDF file not found: {pdf_file}")
-    if not db_file.exists():
-        raise InputError(f"Database file not found: {db_file}")
-
-    # (b) Read database
+    # (a) Database validation
     employees = load_employees(db_file, cfg)
 
-    # (c) Open PDF and read pages
+    # (b) Open PDF
     doc = open_pdf(pdf_file)
-    rdr = reader or LocalPageReader(cfg, ocr)
+    num_pages = len(doc)
 
-    num_pages = doc.page_count
+    # (c) Reader setup
+    if reader is None:
+        rdr = LocalPageReader(cfg, ocr=ocr)
+    else:
+        rdr = reader
 
     all_page_pts = []
     all_page_lines = []
@@ -76,9 +70,12 @@ def run(
     template_names = sorted(employees[i].nama for i in template_indices)
 
     page_records = []
-    groups = []
+    page_infos = []
+    page_cands_list = []
 
-    # (d) & (e) Simple match and grouping
+    accept_score = cfg.get("matching", {}).get("accept_score", 92)
+    continuation_patterns = cfg.get("grouping", {}).get("continuation_patterns", [])
+
     for page_idx in range(num_pages):
         page_num = page_idx + 1
         pt = all_page_pts[page_idx]
@@ -92,6 +89,22 @@ def run(
 
         status, top, reason = decide(cands, employees, cfg)
 
+        is_start = bool(cands and cands[0].score >= accept_score)
+        page_num_str = extract_number(lines, cfg)
+        folded_text = fold(pt.text)
+        continuation = any(re.search(pat, folded_text, re.IGNORECASE) for pat in continuation_patterns)
+
+        page_infos.append(
+            PageInfo(
+                decision=(status, top, reason),
+                is_start=is_start,
+                number=page_num_str,
+                continuation=continuation,
+                source=source,
+            )
+        )
+        page_cands_list.append(cands)
+
         cand_page = []
         for c in cands[:3]:
             cd = {
@@ -103,8 +116,35 @@ def run(
                 cd["partial"] = True
             cand_page.append(cd)
 
+        page_records.append({
+            "page": page_num,
+            "source": source,
+            "candidates": cand_page,
+        })
+
+    # Group pages and check accounting
+    raw_groups = group_pages(page_infos, employees, pages_per_cert, cfg)
+    check_accounting(raw_groups, num_pages)
+
+    groups = []
+    for grp_idx, rg in enumerate(raw_groups):
+        grp_id = grp_idx + 1
+        grp_pages = rg["pages"]
+        deciding_p = rg["deciding_page"]
+        first_p = grp_pages[0]
+
+        first_page_lines = all_page_lines[first_p - 1]
+        group_lines = []
+        for p in grp_pages:
+            group_lines.extend(all_page_lines[p - 1])
+
+        status = rg["status"]
+        reason = rg["reason"]
+        cand = rg["candidate"]
+
+        deciding_cands = page_cands_list[deciding_p - 1]
         cand_group = []
-        for c in cands[:3]:
+        for c in deciding_cands[:3]:
             cd = {
                 "nid": employees[c.index].nid,
                 "nama": employees[c.index].nama,
@@ -115,9 +155,9 @@ def run(
                 cd["partial"] = True
             cand_group.append(cd)
 
-        num_val = extract_number(lines, cfg)
+        num_val = extract_number(first_page_lines, cfg)
         num_conf = "high" if num_val is not None else "low"
-        iss_val, iss_conf, exp_val, exp_conf = extract_dates(lines, cfg)
+        iss_val, iss_conf, exp_val, exp_conf = extract_dates(group_lines, cfg)
         fields_dict = {
             "number": {"value": num_val, "confidence": num_conf},
             "issue_date": {"value": iss_val.isoformat() if iss_val else None, "confidence": iss_conf},
@@ -125,12 +165,12 @@ def run(
         }
         expiry_source = "printed" if exp_val else None
 
-        if status == "accepted" and top is not None:
-            matched_emp = employees[top.index]
+        if status == "accepted" and cand is not None:
+            matched_emp = employees[cand.index]
             file_name = f"{matched_emp.nid}_{matched_emp.nama}.pdf"
             group_entry = {
-                "id": page_num,
-                "pages": [page_num],
+                "id": grp_id,
+                "pages": grp_pages,
                 "status": status,
                 "reason": reason,
                 "nid": matched_emp.nid,
@@ -145,8 +185,8 @@ def run(
             }
         else:
             group_entry = {
-                "id": page_num,
-                "pages": [page_num],
+                "id": grp_id,
+                "pages": grp_pages,
                 "status": status,
                 "reason": reason,
                 "nid": None,
@@ -159,12 +199,6 @@ def run(
                 "renewal": None,
                 "file_name": None,
             }
-
-        page_records.append({
-            "page": page_num,
-            "source": source,
-            "candidates": cand_page,
-        })
         groups.append(group_entry)
 
     # (f) Create run folder
@@ -183,9 +217,10 @@ def run(
         pdf_dir.mkdir(parents=True, exist_ok=True)
         for grp in groups:
             if grp["status"] == "accepted":
-                p_idx = grp["pages"][0] - 1
+                first_idx = grp["pages"][0] - 1
+                last_idx = grp["pages"][-1] - 1
                 new_doc = pymupdf.open()
-                new_doc.insert_pdf(doc, from_page=p_idx, to_page=p_idx)
+                new_doc.insert_pdf(doc, from_page=first_idx, to_page=last_idx)
                 new_doc.save(pdf_dir / grp["file_name"])
                 new_doc.close()
 
