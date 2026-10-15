@@ -9,6 +9,7 @@ import re
 from certslice.config import load_config
 from certslice.database import load_employees
 from certslice.errors import InputError
+from certslice.reader import LocalPageReader, open_pdf
 import pymupdf
 
 
@@ -51,16 +52,10 @@ def run(
     employees = load_employees(db_file, cfg)
 
     # (c) Open PDF and read pages
-    try:
-        doc = pymupdf.open(pdf_file)
-    except Exception as e:
-        raise InputError(f"Could not open PDF file: {e}")
+    doc = open_pdf(pdf_file)
+    rdr = reader or LocalPageReader(cfg, ocr)
 
     num_pages = doc.page_count
-    if num_pages == 0:
-        doc.close()
-        raise InputError("PDF contains no pages")
-
     page_records = []
     groups = []
 
@@ -69,15 +64,11 @@ def run(
         page_num = page_idx + 1
         page = doc[page_idx]
 
-        if reader is not None:
-            page_text_obj = reader.read(page)
-            raw_text = page_text_obj.text
-            source = page_text_obj.source
-        else:
-            raw_text = page.get_text("text")
-            source = "text"
+        pt = rdr.read(page)
+        lines = [line for line in pt.text.splitlines() if line.strip()]
+        source = pt.source
 
-        folded_page = " " + _fold_text(raw_text) + " "
+        folded_page = " " + _fold_text(pt.text) + " "
 
         matched_employees = []
         for emp in employees:

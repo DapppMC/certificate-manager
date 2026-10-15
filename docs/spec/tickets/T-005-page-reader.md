@@ -4,7 +4,7 @@ id: T-005
 date: 2026-10-15
 tags: [ticket]
 when: Adds reader.py: open_pdf with clear errors and LocalPageReader (text layer); pipeline accepts any PageReader.
-status: todo
+status: done
 owner: executor
 kind: feature
 phase: 1
@@ -100,6 +100,28 @@ Append to the "Execution report" section below (this format is mandatory and is 
 - Never say done until the verification commands ran in this session and their exit codes and final lines are pasted.
 
 ## Execution report
-Status: not started.
+Status: done.
+
+Files changed:
+- `src/certslice/reader.py` (created)
+- `src/certslice/pipeline.py` (modified)
+- `tests/unit/test_reader.py` (created)
+- `docs/spec/tickets/T-005-page-reader.md` (modified)
+
+Commands run:
+- `.\.venv\Scripts\python.exe scripts/run_check.py --name t005 --fail-on "no tests ran" -- python scripts/stage_tests.py --upto T-005`:
+  EXIT=0
+  RESULT: PASS
+- `.\.venv\Scripts\python.exe scripts/run_check.py --name secrets -- python scripts/scan_secrets.py`:
+  EXIT=0
+  RESULT: PASS
+
+Acceptance criteria:
+- AC1: Corrupt, encrypted and missing PDFs exit 2 with nothing written: PASS (verified via `test_corrupt_pdf`, `test_encrypted_pdf`, `test_missing_pdf`).
+- AC2: A fake reader passed to `pipeline.run` drives the run and its `source` appears in plan.json: PASS (verified via `test_fake_reader_drives_the_whole_pipeline`).
+- AC3: All earlier acceptance tests still pass: PASS (all tests for T-001 through T-005 passing, 46/46 passed).
+
+Deviations from the plan: none.
+Open issues and questions for the planner: none.
 
 Related: [requirements](../01-requirements.md), [verification](../04-verification.md), [tickets index](INDEX.md)
