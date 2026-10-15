@@ -3,12 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import json
+import logging
 from pathlib import Path
 import re
+import time
 
 from certslice.config import fold_text, load_aliases, load_config
 from certslice.database import load_employees
-from certslice.errors import InputError
+from certslice.errors import AccountingError, InputError
 from certslice.expiry import apply_rules
 from certslice.fields import (
     doc_type,
@@ -26,6 +28,8 @@ from certslice.normalize import fold
 from certslice.reader import LocalPageReader, open_pdf
 from certslice.writer import write_workbooks
 import pymupdf
+
+logger = logging.getLogger("certslice")
 
 
 @dataclass
@@ -46,6 +50,7 @@ def run(
     config_path=None,
     reader=None,
 ) -> RunResult:
+    t0 = time.perf_counter()
     cfg = load_config(config_path)
     pdf_file = Path(pdf_path)
     db_file = Path(db_path)
@@ -76,6 +81,9 @@ def run(
         all_page_pts.append(pt)
         all_page_lines.append(lines)
         all_page_raw_cands.append(cands)
+
+    t_read = time.perf_counter()
+    logger.info("read %d pages", num_pages)
 
     template_indices = template_employees(all_page_raw_cands, num_pages, cfg)
     template_names = sorted(employees[i].nama for i in template_indices)
@@ -135,7 +143,58 @@ def run(
 
     # Group pages and check accounting
     raw_groups = group_pages(page_infos, employees, pages_per_cert, cfg)
-    check_accounting(raw_groups, num_pages)
+    try:
+        check_accounting(raw_groups, num_pages)
+    except AccountingError as exc:
+        out_path.mkdir(parents=True, exist_ok=True)
+        base_name = f"run-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        run_dir = out_path / base_name
+        counter = 2
+        while run_dir.exists():
+            run_dir = out_path / f"{base_name}-{counter}"
+            counter += 1
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        plan_groups = []
+        for grp_idx, rg in enumerate(raw_groups):
+            plan_groups.append({
+                "id": grp_idx + 1,
+                "pages": rg["pages"],
+                "status": rg["status"],
+                "reason": rg["reason"],
+                "nid": None,
+                "nama": None,
+                "email": None,
+                "unit": None,
+                "candidates": [],
+                "fields": {},
+                "expiry_source": None,
+                "renewal": None,
+                "file_name": None,
+            })
+
+        plan_data = {
+            "version": 1,
+            "input_pdf": str(pdf_file),
+            "database": str(db_file),
+            "page_count": num_pages,
+            "dry_run": dry_run,
+            "pages_per_cert": pages_per_cert,
+            "template_names": template_names,
+            "pages": page_records,
+            "groups": plan_groups,
+            "timings": {
+                "read_seconds": round(t_read - t0, 3),
+                "total_seconds": round(time.perf_counter() - t0, 3),
+                "ocr_pages": 0,
+                "ocr_seconds_per_page": None,
+            },
+        }
+        plan_path = run_dir / "plan.json"
+        plan_path.write_text(json.dumps(plan_data, ensure_ascii=False, indent=2), encoding="utf-8")
+        doc.close()
+        exc.run_dir = run_dir
+        raise exc
 
     tmpl_lines = template_lines(all_page_lines, cfg)
 
@@ -229,6 +288,8 @@ def run(
             }
         groups.append(group_entry)
 
+    logger.info("grouped into %d certificates", len(groups))
+
     # (e.2) Apply aliases and standard file naming before creating output folder
     aliases = load_aliases(cfg)
     builder = NameBuilder(out_path, cfg)
@@ -280,6 +341,7 @@ def run(
                 new_doc.close()
 
         write_workbooks(run_dir, groups, cfg)
+        logger.info("wrote outputs to %s", run_dir)
 
     doc.close()
 
@@ -295,8 +357,8 @@ def run(
         "pages": page_records,
         "groups": groups,
         "timings": {
-            "read_seconds": 0.0,
-            "total_seconds": 0.0,
+            "read_seconds": round(t_read - t0, 3),
+            "total_seconds": round(time.perf_counter() - t0, 3),
             "ocr_pages": 0,
             "ocr_seconds_per_page": None,
         },

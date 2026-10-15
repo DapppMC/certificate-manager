@@ -4,7 +4,7 @@ id: T-015
 date: 2026-10-15
 tags: [ticket]
 when: Finishes the engine: pure dry run, exit 3 with plan.json on accounting errors, timings, logging, entry point checks.
-status: todo
+status: done
 owner: executor
 kind: feature
 phase: 1
@@ -92,6 +92,24 @@ Append to the "Execution report" section below (this format is mandatory and is 
 - Never say done until the verification commands ran in this session and their exit codes and final lines are pasted.
 
 ## Execution report
-Status: not started.
+Status: done.
+- Ticket: T-015, status: done
+- Files changed:
+  - `src/certslice/pipeline.py` (modified)
+  - `src/certslice/cli.py` (modified)
+  - `tests/unit/test_pipeline.py` (created)
+- Commands run:
+  - `.\.venv\Scripts\python.exe scripts/run_check.py --name t015 --fail-on "no tests ran" -- python scripts/stage_tests.py --upto T-015`:
+    EXIT=0
+    RESULT: PASS
+  - `.\.venv\Scripts\python.exe scripts/run_check.py --name secrets -- python scripts/scan_secrets.py`:
+    EXIT=0
+    RESULT: PASS
+- Acceptance criteria:
+  - AC1: pass (Dry run and real run folder contents match exactly)
+  - AC2: pass (Accounting holds for all 8 text bundles; accounting error exits 3 with plan.json kept)
+  - AC3: pass (Two runs give two folders with equal manifests; 30 pages run in ~4.65s under 300s; paths with spaces and `python -m certslice` work; run with sockets blocked succeeds)
+- Deviations from the plan: none
+- Open issues and questions for the planner: none
 
 Related: [requirements](../01-requirements.md), [verification](../04-verification.md), [tickets index](INDEX.md)

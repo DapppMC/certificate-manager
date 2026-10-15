@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 
 from certslice import pipeline
@@ -8,6 +9,9 @@ from certslice.errors import AccountingError, InputError
 
 
 def main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(levelname)s %(message)s")
+    logging.getLogger("RapidOCR").setLevel(logging.WARNING)
+
     parser = argparse.ArgumentParser(prog="certslice", description="Certificate Slicer CLI")
     subparsers = parser.add_subparsers(dest="subcommand")
 
