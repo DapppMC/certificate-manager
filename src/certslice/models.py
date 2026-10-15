@@ -33,3 +33,4 @@ class Candidate:
     index: int      # position of the employee in the employee list
     score: float
     line: int       # index of the page line with the best score
+    partial: bool = False

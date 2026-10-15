@@ -72,23 +72,28 @@ def run(
         cands = page_candidates(lines, employees, cfg)
         status, top, reason = decide(cands, employees, cfg)
 
-        cand_page = [
-            {
+        cand_page = []
+        for c in cands[:3]:
+            cd = {
                 "nid": employees[c.index].nid,
                 "nama": employees[c.index].nama,
                 "score": round(c.score, 1),
             }
-            for c in cands[:3]
-        ]
-        cand_group = [
-            {
+            if c.partial:
+                cd["partial"] = True
+            cand_page.append(cd)
+
+        cand_group = []
+        for c in cands[:3]:
+            cd = {
                 "nid": employees[c.index].nid,
                 "nama": employees[c.index].nama,
                 "unit": employees[c.index].unit,
                 "score": round(c.score, 1),
             }
-            for c in cands[:3]
-        ]
+            if c.partial:
+                cd["partial"] = True
+            cand_group.append(cd)
 
         if status == "accepted" and top is not None:
             matched_emp = employees[top.index]
