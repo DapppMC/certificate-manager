@@ -4,7 +4,7 @@ id: T-002
 date: 2026-10-15
 tags: [ticket]
 when: Loads default_config.toml plus a user override and the alias CSV; defines PageText, PageReader, Employee and Candidate.
-status: todo
+status: done
 owner: executor
 kind: feature
 phase: 1
@@ -112,6 +112,29 @@ Append to the "Execution report" section below (this format is mandatory and is 
 - Never say done until the verification commands ran in this session and their exit codes and final lines are pasted.
 
 ## Execution report
-Status: not started.
+Status: done.
+
+Files changed:
+- `src/certslice/models.py` (created)
+- `src/certslice/config.py` (created)
+- `src/certslice/pipeline.py` (modified)
+- `tests/unit/test_config.py` (created)
+- `docs/spec/tickets/T-002-config-and-models.md` (modified)
+
+Commands run:
+- `.\.venv\Scripts\python.exe scripts/run_check.py --name t002 --fail-on "no tests ran" -- python scripts/stage_tests.py --upto T-002`:
+  EXIT=0
+  RESULT: PASS
+- `.\.venv\Scripts\python.exe scripts/run_check.py --name secrets -- python scripts/scan_secrets.py`:
+  EXIT=0
+  RESULT: PASS
+
+Acceptance criteria:
+- AC1: `load_config(None)` returns the defaults and merge rules hold: PASS (verified via `test_defaults_load`, `test_user_file_partial_override`, `test_user_validity_rules_replaces_list`).
+- AC2: `PageText` and `PageReader` exist in `certslice.models` with the fields shown: PASS (defined in `models.py`).
+- AC3: All earlier acceptance tests still pass: PASS (5/5 tests in `test_t001_skeleton.py` and unit tests passed).
+
+Deviations from the plan: none.
+Open issues and questions for the planner: none.
 
 Related: [requirements](../01-requirements.md), [verification](../04-verification.md), [tickets index](INDEX.md)

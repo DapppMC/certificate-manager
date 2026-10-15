@@ -9,6 +9,7 @@ import re
 import openpyxl
 import pymupdf
 
+from certslice.config import load_config
 from certslice.errors import InputError
 
 
@@ -36,6 +37,7 @@ def run(
     config_path=None,
     reader=None,
 ) -> RunResult:
+    cfg = load_config(config_path)
     pdf_file = Path(pdf_path)
     db_file = Path(db_path)
     out_path = Path(out_dir)
