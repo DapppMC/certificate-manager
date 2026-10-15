@@ -4,7 +4,7 @@ id: T-000b
 date: 2026-10-15
 tags: [ticket, setup]
 when: Second ticket. Creates the virtual environment, installs pinned packages, generates the synthetic fixtures and proves the check scripts work.
-status: todo
+status: done
 owner: executor
 kind: setup
 phase: 0
@@ -96,6 +96,14 @@ Append to "Execution report" (mandatory, never shortened): status; files changed
 - Never say done until the verification commands ran in this session and their results are pasted.
 
 ## Execution report
-Status: not started.
+Status: done.
+Files changed: .venv (created, gitignored), tests/fixtures/* (18 files generated and committed), requirements.lock.txt (created), README.md (created).
+Verification results:
+- imports: EXIT=0, RESULT: PASS
+- fixtures: fixtures=18, EXIT=0, RESULT: PASS
+- secrets: scanned 132 file(s); findings=0, EXIT=0, RESULT: PASS
+- git check-ignore samples/x.pdf: samples/x.pdf
+Deviations: none.
+Open issues: none.
 
 Related: [requirements](../01-requirements.md), [safety baseline](T-000a-safety-baseline.md), [tickets index](INDEX.md)
