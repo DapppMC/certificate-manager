@@ -9,6 +9,7 @@ import re
 from certslice.config import load_config
 from certslice.database import load_employees
 from certslice.errors import InputError
+from certslice.expiry import apply_rules
 from certslice.fields import (
     doc_type,
     extract_dates,
@@ -170,6 +171,9 @@ def run(
         num_val = extract_number(first_page_lines, cfg)
         num_conf = "high" if num_val is not None else "low"
         iss_val, iss_conf, exp_val, exp_conf = extract_dates(group_lines, cfg)
+        group_text_folded = " ".join(fold(line) for line in group_lines)
+        exp_val, exp_conf, expiry_source = apply_rules(iss_val, exp_val, exp_conf, group_text_folded, cfg)
+
         title_val, title_conf = extract_title(first_page_lines, tmpl_lines, group_is_bundle, num_pages, cfg)
         issuer_val, issuer_conf = extract_issuer(group_lines, tmpl_lines, cfg)
         type_val, type_conf = doc_type(title_val, group_lines, cfg)
@@ -183,7 +187,6 @@ def run(
             "issuer": {"value": issuer_val, "confidence": issuer_conf},
             "doc_type": {"value": type_val, "confidence": type_conf},
         }
-        expiry_source = "printed" if exp_val else None
 
         if status == "accepted" and cand is not None:
             matched_emp = employees[cand.index]

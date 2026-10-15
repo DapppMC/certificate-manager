@@ -4,7 +4,7 @@ id: T-012
 date: 2026-10-15
 tags: [ticket]
 when: Adds expiry.py: printed expiry wins, then a printed duration, else DJK 5 years, K3/BNSP 3 years, internal training none.
-status: todo
+status: done
 owner: executor
 kind: feature
 phase: 1
@@ -94,6 +94,24 @@ Append to the "Execution report" section below (this format is mandatory and is 
 - Never say done until the verification commands ran in this session and their exit codes and final lines are pasted.
 
 ## Execution report
-Status: not started.
+Status: done.
+- Ticket: T-012, status: done
+- Files changed:
+  - `src/certslice/expiry.py` (created)
+  - `src/certslice/pipeline.py` (modified)
+  - `tests/unit/test_expiry.py` (created)
+- Commands run:
+  - `.\.venv\Scripts\python.exe scripts/run_check.py --name t012 --fail-on "no tests ran" -- python scripts/stage_tests.py --upto T-012`:
+    EXIT=0
+    RESULT: PASS
+  - `.\.venv\Scripts\python.exe scripts/run_check.py --name secrets -- python scripts/scan_secrets.py`:
+    EXIT=0
+    RESULT: PASS
+- Acceptance criteria:
+  - AC1: pass (`bundle_djk.pdf`: expiry `2030-08-17`, source `rule:5y`)
+  - AC2: pass (`bundle_internal.pdf`: expiry null, confidence not `low`, source `rule:none`; `bundle_simple.pdf` keeps the printed date)
+  - AC3: pass (`bundle_bnsp_like.pdf`: expiry `2029-08-20`, confidence high, source `duration:3y`)
+- Deviations from the plan: none
+- Open issues and questions for the planner: none
 
 Related: [requirements](../01-requirements.md), [verification](../04-verification.md), [tickets index](INDEX.md)
