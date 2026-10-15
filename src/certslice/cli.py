@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import logging
+from pathlib import Path
 import sys
 
 from certslice import pipeline
 from certslice.errors import AccountingError, InputError
+from certslice.evaluate import evaluate
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,8 +40,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.subcommand == "evaluate":
-        sys.stderr.write("ERROR: evaluate is not implemented yet\n")
-        return 1
+        try:
+            return evaluate(Path(args.run), Path(args.gold))
+        except InputError as e:
+            sys.stderr.write(f"ERROR: {e}\n")
+            return 2
 
     if args.subcommand == "run":
         try:

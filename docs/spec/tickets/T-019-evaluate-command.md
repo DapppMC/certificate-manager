@@ -4,7 +4,7 @@ id: T-019
 date: 2026-10-15
 tags: [ticket]
 when: Adds evaluate.py and wires `python -m certslice evaluate`; prints SET, FIELD and WRONG_NID lines and exits 4 on a wrong NID.
-status: todo
+status: blocked
 owner: executor
 kind: feature
 phase: 1
@@ -89,6 +89,41 @@ Append to the "Execution report" section below (this format is mandatory and is 
 - Never say done until the verification commands ran in this session and their exit codes and final lines are pasted.
 
 ## Execution report
-Status: not started.
+- Ticket: T-019
+- Status: blocked
+- Class: plan or ticket (steps contradict; a file outside the ticket list is needed)
+- First error line:
+  `FAILED tests/unit/test_cli.py::test_cli_evaluate_stub_returns_1 - assert 2 == 1`
+- Output last 20 lines:
+  ```
+  ================================== FAILURES ===================================
+  ______________________ test_cli_evaluate_stub_returns_1 _______________________
+
+      def test_cli_evaluate_stub_returns_1():
+          code = main(["evaluate", "--run", "x", "--gold", "y"])
+  >       assert code == 1
+  E       assert 2 == 1
+
+  tests\unit\test_cli.py:13: AssertionError
+  ---------------------------- Captured stderr call -----------------------------
+  ERROR: Run directory not found: x
+  =========================== short test summary info ===========================
+  FAILED tests/unit/test_cli.py::test_cli_evaluate_stub_returns_1 - assert 2 == 1
+  1 failed, 155 passed in 14.98s
+  RUN: -m pytest -q -p no:cacheprovider tests/acceptance/test_t001_skeleton.py tests/acceptance/test_normalize_contract.py tests/acceptance/test_database.py tests/acceptance/test_pdf_input.py tests/acceptance/test_reader_hook.py tests/acceptance/test_matching.py tests/acceptance/test_names_real_patterns.py tests/acceptance/test_signatory.py tests/acceptance/test_fields_dates.py tests/acceptance/test_dates_contract.py tests/acceptance/test_grouping.py tests/acceptance/test_fields_text.py tests/acceptance/test_expiry.py tests/acceptance/test_naming.py tests/acceptance/test_outputs.py tests/acceptance/test_pipeline.py tests/acceptance/test_speed.py tests/acceptance/test_offline.py tests/acceptance/test_ocr.py tests/acceptance/test_evaluate.py tests/unit
+  ```
+- Files changed:
+  - `src/certslice/evaluate.py` (created)
+  - `src/certslice/cli.py` (modified)
+  - `tests/unit/test_evaluate.py` (created)
+  - `docs/spec/tickets/T-019-evaluate-command.md` (modified)
+- Commands run:
+  - `.\.venv\Scripts\python.exe scripts/run_check.py --name t019 --fail-on "no tests ran" -- python scripts/stage_tests.py --upto T-019` (exit code 1)
+  - `.\.venv\Scripts\python.exe scripts/stage_tests.py --upto T-019` (exit code 1)
+- Hypotheses tried:
+  - Hypothesis 1: `evaluate` implementation in `evaluate.py` and `cli.py` correctly maps `InputError` to exit code 2 per T-019 Step 3, passing all acceptance tests (including `test_evaluate.py`). However, earlier unit test `tests/unit/test_cli.py::test_cli_evaluate_stub_returns_1` (from T-001) asserts that `evaluate` returns 1 because it was written specifically for the T-001 stub.
+- Best guess:
+  `tests/unit/test_cli.py` needs to be updated (or listed in T-019's file list) so `test_cli_evaluate_stub_returns_1` can be updated to `test_cli_evaluate_missing_files_returns_2` (asserting `code == 2`). Because `tests/unit/test_cli.py` is a unit test of an earlier ticket, it is a protected path under AGENTS.md and cannot be edited by the executor without planner authorization.
+- Proposed lesson: ticket replacing a placeholder | when a ticket replaces a stub/placeholder with real functionality, the planner must list and update any earlier unit tests that explicitly verified the stub's return value.
 
 Related: [requirements](../01-requirements.md), [verification](../04-verification.md), [tickets index](INDEX.md)
