@@ -8,7 +8,7 @@ from typing import Any
 import pymupdf
 
 from certslice.config import load_config
-from certslice.naming import NameBuilder
+from certslice.naming import NameBuilder, clean_field
 from certslice.writer import write_workbooks
 
 
@@ -97,13 +97,29 @@ def approve_group(
     iss_date = target_grp.get("fields", {}).get("issue_date", {}).get("value")
     tahun = custom_year or (iss_date.split("-")[0] if iss_date else "0000")
 
-    file_name = builder.build(
-        nid=nid,
-        nama=nama,
-        judul=judul,
-        tahun=tahun,
-        renewal=target_grp.get("renewal"),
-    )
+    if not (nid and nid.strip()):
+        clean_nama = clean_field(nama) or "Tanpa Nama"
+        clean_judul = clean_field(judul) or "Tanpa Judul"
+        clean_tahun = clean_field(tahun) or "0000"
+        ren_val = target_grp.get("renewal")
+        ren_suffix = builder.renewal_suffix.format(ke=ren_val) if ren_val is not None else ""
+        base_name = f"{clean_nama}_{clean_judul}_{clean_tahun}{ren_suffix}"
+        base_key = base_name.lower()
+        count = builder.seen_names.get(base_key, 0) + 1
+        builder.seen_names[base_key] = count
+        if count == 1:
+            file_name = f"{base_name}.pdf"
+        else:
+            dup_suffix = builder.duplicate_suffix.format(n=count)
+            file_name = f"{base_name}{dup_suffix}.pdf"
+    else:
+        file_name = builder.build(
+            nid=nid.strip(),
+            nama=nama.strip(),
+            judul=judul,
+            tahun=tahun,
+            renewal=target_grp.get("renewal"),
+        )
 
     # Slice PDF if original PDF exists
     input_pdf_path = Path(plan_data.get("input_pdf", ""))

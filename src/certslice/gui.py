@@ -321,7 +321,18 @@ class ReviewDialog(tk.Toplevel):
         # Set human friendly explanation
         reason = grp.get("reason", "")
         cands = grp.get("candidates", [])
-        if reason == "partial name":
+        raw_name = grp.get("raw_name") or ""
+
+        if not cands or reason == "no confident holder":
+            target_str = f"'{raw_name}'" if raw_name else "penerima sertifikat"
+            msg = (
+                f"⚠️ Alasan Ragu: Nama Tidak Ditemukan di Database Master.\n"
+                f"Nama yang tertera pada sertifikat ({target_str}) sudah dicari di seluruh file database Excel tetapi TIDAK DITEMUKAN sama sekali.\n\n"
+                f"👉 Kolom NID dan Unit Kerja sengaja dikosongkan.\n"
+                f"👉 Nama, Judul Sertifikat, dan Tahun telah diambil langsung dari PDF.\n"
+                f"Silakan periksa pratinjau gambar sertifikat di sebelah kiri. Jika sudah benar, Anda dapat langsung klik 'Setujui & Simpan ke PDF'."
+            )
+        elif reason == "partial name":
             cand_name = cands[0]["nama"] if cands else "pegawai terkait"
             msg = (
                 f"⚠️ Alasan Ragu: Nama Parsial / Singkatan.\n"
@@ -360,7 +371,17 @@ class ReviewDialog(tk.Toplevel):
                 rb.pack(fill="x", pady=2)
             self._on_cand_chosen()
         else:
-            tk.Label(self.candidates_frame, text="Tidak ada kandidat otomatis. Silakan isi NID & Nama manual.", bg="#FFFFFF", fg="#64748B").pack(anchor="w")
+            tk.Label(
+                self.candidates_frame,
+                text="⚠️ Tidak ditemukan kecocokan di database master.\nData NID & Unit dikosongkan. Nama & judul diambil dari sertifikat.",
+                bg="#FFFFFF",
+                fg="#DC2626",
+                justify="left",
+                font=("Segoe UI", 9, "bold"),
+            ).pack(anchor="w", pady=4)
+            self.nama_var.set(raw_name)
+            self.nid_var.set("")
+            self.unit_var.set("")
 
         fields = grp.get("fields", {})
         self.title_var.set(fields.get("title", {}).get("value") or "Tanpa Judul")
@@ -443,8 +464,8 @@ class ReviewDialog(tk.Toplevel):
         judul = self.title_var.get().strip()
         tahun = self.year_var.get().strip()
 
-        if not nid or not nama:
-            messagebox.showwarning("Peringatan", "NID dan Nama Pegawai harus diisi untuk menyetujui.")
+        if not nama:
+            messagebox.showwarning("Peringatan", "Nama Pegawai harus diisi untuk menyetujui.")
             return
 
         try:

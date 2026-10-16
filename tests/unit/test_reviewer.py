@@ -79,3 +79,54 @@ def test_get_review_and_approve_group(tmp_path: Path):
 
     # Re-check get_review_items should be empty now
     assert len(get_review_items(run_dir)) == 0
+
+
+def test_approve_group_empty_nid(tmp_path: Path):
+    pdf_path = tmp_path / "bundle2.pdf"
+    doc = pymupdf.open()
+    doc.new_page(width=300, height=400)
+    doc.save(pdf_path)
+    doc.close()
+
+    run_dir = tmp_path / "run-test-empty-nid"
+    run_dir.mkdir()
+
+    plan_data = {
+        "input_pdf": str(pdf_path),
+        "groups": [
+            {
+                "id": 1,
+                "pages": [1],
+                "status": "unmatched",
+                "reason": "no confident holder",
+                "nid": None,
+                "nama": None,
+                "raw_name": "RAYHAN FADLILLAH",
+                "candidates": [],
+                "fields": {
+                    "title": {"value": "Pelatihan K3", "confidence": "high"},
+                    "issue_date": {"value": "2024-05-10", "confidence": "high"},
+                    "expiry_date": {"value": "2027-05-10", "confidence": "high"},
+                    "issuer": {"value": "BNSP", "confidence": "high"},
+                    "number": {"value": "123/K3/2024", "confidence": "high"},
+                    "doc_type": {"value": "sertifikasi", "confidence": "high"},
+                },
+                "renewal": None,
+                "file_name": None,
+            }
+        ]
+    }
+    (run_dir / "plan.json").write_text(json.dumps(plan_data), encoding="utf-8")
+
+    file_name = approve_group(
+        run_dir=run_dir,
+        group_id=1,
+        nid="",
+        nama="RAYHAN FADLILLAH",
+        unit="",
+    )
+    assert file_name == "RAYHAN FADLILLAH_Pelatihan K3_2024.pdf"
+    assert (run_dir / "pdf" / file_name).exists()
+    assert (run_dir / "data.xlsx").exists()
+    assert len(get_review_items(run_dir)) == 0
+

@@ -33,6 +33,52 @@ import pymupdf
 logger = logging.getLogger("certslice")
 
 
+def extract_raw_holder_name(lines: list[str], cfg: dict) -> str | None:
+    """Extract candidate recipient name printed on certificate if not found in database."""
+    m = cfg.get("matching", {})
+    holder_cues = m.get(
+        "holder_cues",
+        [
+            "diberikan kepada",
+            "awarded to",
+            "presented to",
+            "nama",
+            "name",
+            "kepada",
+            "certify that",
+            "menyatakan bahwa",
+        ],
+    )
+    for i, line in enumerate(lines):
+        fl = fold(line).replace(" ", "")
+        for cue in holder_cues:
+            fc = fold(cue).replace(" ", "")
+            if fc in fl:
+                for j in range(i + 1, min(i + 4, len(lines))):
+                    cand = lines[j].strip()
+                    fl_cand = fold(cand)
+                    if any(
+                        bad in fl_cand
+                        for bad in [
+                            "pt ",
+                            "pln",
+                            "training",
+                            "pelatihan",
+                            "sertifikat",
+                            "certificate",
+                            "nomor",
+                            "no:",
+                            "direktur",
+                            "director",
+                            "kompeten",
+                        ]
+                    ):
+                        continue
+                    if len(cand.split()) >= 1 and len(cand) >= 3:
+                        return cand
+    return None
+
+
 @dataclass
 class RunResult:
     run_dir: Path | None
@@ -61,11 +107,9 @@ def run(
 ) -> RunResult:
     t0 = time.perf_counter()
     cfg = load_config(config_path)
-    if not gemini_api_key:
+    if use_ai and not gemini_api_key:
         settings = load_user_settings()
         gemini_api_key = settings.get("gemini_api_key")
-        if not use_ai and settings.get("use_ai"):
-            use_ai = True
     if ocr_enabled is not None:
         ocr = ocr_enabled
     pdf_file = Path(pdf_path or pdf_file)
@@ -298,6 +342,7 @@ def run(
                     except Exception:
                         pass
 
+        raw_name = extract_raw_holder_name(first_page_lines, cfg)
         if status == "accepted" and cand is not None:
             matched_emp = employees[cand.index]
             group_entry = {
@@ -307,6 +352,7 @@ def run(
                 "reason": reason,
                 "nid": matched_emp.nid,
                 "nama": matched_emp.nama,
+                "raw_name": raw_name,
                 "email": matched_emp.email,
                 "unit": matched_emp.unit,
                 "candidates": cand_group,
@@ -324,6 +370,7 @@ def run(
                 "reason": reason,
                 "nid": None,
                 "nama": None,
+                "raw_name": raw_name,
                 "email": None,
                 "unit": None,
                 "candidates": cand_group,
@@ -390,7 +437,13 @@ def run(
                 new_doc.save(pdf_dir / grp["file_name"])
             else:
                 cands = grp.get("candidates", [])
-                cand_str = f"_{cands[0]['nid']}_{clean_field(cands[0]['nama'])}" if cands else ""
+                raw_n = grp.get("raw_name")
+                if cands:
+                    cand_str = f"_{cands[0]['nid']}_{clean_field(cands[0]['nama'])}"
+                elif raw_n:
+                    cand_str = f"_{clean_field(raw_n)}"
+                else:
+                    cand_str = ""
                 pg_str = f"Hal{grp['pages'][0]}" if len(grp["pages"]) == 1 else f"Hal{grp['pages'][0]}-{grp['pages'][-1]}"
                 review_fname = f"[REVIEW]_{pg_str}{cand_str}.pdf"
                 grp["review_file_name"] = review_fname
