@@ -37,17 +37,24 @@ from certslice.reviewer import get_review_items, render_page_image, approve_grou
 
 
 def get_default_database_path() -> str:
-    """Find default database path from settings or common directories."""
+    """Find default database path from settings, application directory, or common folders."""
     settings = load_user_settings()
     saved = settings.get("default_db_path")
     if saved and Path(saved).exists():
         return saved
 
-    # User's known download directory
-    known = Path(r"C:\Users\lenovo\Downloads\Plan\Data Master SDM April (Ellipse 30 04 2026).xlsx")
-    if known.exists():
-        return str(known)
+    # Check if bundled or local sample database exists next to executable
+    app_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent.parent
+    local_sample = app_dir / "sample_database.xlsx"
+    if local_sample.exists():
+        return str(local_sample.resolve())
 
+    # Check templates directory
+    tmpl_sample = app_dir / "templates" / "sample_database.xlsx"
+    if tmpl_sample.exists():
+        return str(tmpl_sample.resolve())
+
+    # User download directory
     plan_dir = Path.home() / "Downloads" / "Plan"
     if plan_dir.exists():
         for f in plan_dir.glob("Data Master*.xlsx"):
@@ -68,10 +75,6 @@ def get_default_output_dir() -> str:
     saved = settings.get("default_out_path")
     if saved and Path(saved).exists():
         return saved
-
-    known = Path(r"C:\Users\lenovo\Downloads\Out")
-    if known.exists():
-        return str(known)
 
     d = Path.home() / "Downloads" / "Out"
     d.mkdir(parents=True, exist_ok=True)
