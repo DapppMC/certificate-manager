@@ -36,14 +36,41 @@ logger = logging.getLogger("certslice")
 def extract_raw_holder_name(lines: list[str], cfg: dict) -> str | None:
     """Extract candidate recipient name printed on certificate if not found in database."""
     m = cfg.get("matching", {})
+    bad_keywords = [
+        "pt ", "pln", "training", "pelatihan", "sertifikat", "certificate",
+        "nomor", "no:", "no.", "nik", "paspor", "passport", "identity",
+        "direktur", "director", "kompeten", "competent", "tempat", "tanggal",
+        "lahir", "birth", "alamat", "address", "dengan ini", "menyatakan bahwa",
+        "telah dinyatakan", "jabatan", "profesi", "jenjang", "kualifikasi",
+        "(name)", "nama (name)", "name (nama)"
+    ]
+
+    # Pass 1: Look for explicit Name / Nama labels
+    for i, line in enumerate(lines):
+        line_clean = line.strip()
+        m_name = re.search(r"^\s*(?:nama|name)\s*(?:\([^)]*\))?\s*[:]\s*(.+)$", line_clean, re.IGNORECASE)
+        if m_name:
+            val = m_name.group(1).strip(" :-_.")
+            fl_val = fold(val)
+            if val and len(val) >= 3 and not any(bad in fl_val for bad in bad_keywords):
+                return val
+
+        m_label = re.match(r"^\s*(?:nama|name)\s*(?:\([^)]*\))?\s*[:]?$", line_clean, re.IGNORECASE)
+        if m_label:
+            for j in range(i + 1, min(i + 4, len(lines))):
+                nxt = lines[j].strip(" :-_.")
+                fl_nxt = fold(nxt)
+                if nxt and len(nxt) >= 3 and not any(bad in fl_nxt for bad in bad_keywords):
+                    if not re.match(r"^\d+$", nxt):
+                        return nxt
+
+    # Pass 2: Look for general holder cues ("diberikan kepada", "awarded to", etc.)
     holder_cues = m.get(
         "holder_cues",
         [
             "diberikan kepada",
             "awarded to",
             "presented to",
-            "nama",
-            "name",
             "kepada",
             "certify that",
             "menyatakan bahwa",
@@ -55,26 +82,11 @@ def extract_raw_holder_name(lines: list[str], cfg: dict) -> str | None:
             fc = fold(cue).replace(" ", "")
             if fc in fl:
                 for j in range(i + 1, min(i + 4, len(lines))):
-                    cand = lines[j].strip()
+                    cand = lines[j].strip(" :-_.")
                     fl_cand = fold(cand)
-                    if any(
-                        bad in fl_cand
-                        for bad in [
-                            "pt ",
-                            "pln",
-                            "training",
-                            "pelatihan",
-                            "sertifikat",
-                            "certificate",
-                            "nomor",
-                            "no:",
-                            "direktur",
-                            "director",
-                            "kompeten",
-                        ]
-                    ):
+                    if any(bad in fl_cand for bad in bad_keywords):
                         continue
-                    if len(cand.split()) >= 1 and len(cand) >= 3:
+                    if len(cand.split()) >= 1 and len(cand) >= 3 and not re.match(r"^\d+$", cand):
                         return cand
     return None
 
@@ -102,7 +114,7 @@ def run(
     reader=None,
     use_ai=False,
     gemini_api_key=None,
-    gemini_model="gemini-2.5-flash",
+    gemini_model="gemini-flash-lite-latest",
     run_name=None,
 ) -> RunResult:
     t0 = time.perf_counter()

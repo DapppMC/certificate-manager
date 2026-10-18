@@ -30,6 +30,7 @@ if sys.platform == "win32":
 
 import pymupdf
 
+from certslice.bulk import BulkResult, process_bulk_files
 from certslice.gemini import load_user_settings, save_user_settings
 from certslice import pipeline
 from certslice.reviewer import get_review_items, render_page_image, approve_group
@@ -124,15 +125,21 @@ class ReviewDialog(tk.Toplevel):
         super().__init__(parent)
         self.parent_app = parent
         self.run_dir = run_dir
-        self.title("Review & Koreksi Sertifikat - Certificate Sorter")
-        self.geometry("1060x740")
-        self.minsize(940, 640)
+        self.title("Review & Koreksi Sertifikat - Certificate Manager")
+        self.geometry("1160x780")
+        self.minsize(980, 660)
         self.configure(bg="#F1F5F9")
+        self.transient(parent)
+        self.lift()
+        self.focus_force()
 
         self.review_items: list[dict[str, Any]] = []
         self.selected_item: dict[str, Any] | None = None
         self.current_preview_page: int = 1
         self.current_photo: tk.PhotoImage | None = None
+        self.zoom_level: float = 1.0
+        self.fit_width_mode: bool = True
+        self.canvas_img_id: Any = None
 
         self._build_ui()
         self._load_data()
@@ -164,8 +171,26 @@ class ReviewDialog(tk.Toplevel):
 
         tk.Label(left_frame, text="📋 Daftar yang Perlu Dicek", font=("Segoe UI", 10, "bold"), bg="#F8FAFC", fg="#1E293B", pady=8).pack(fill="x")
 
+        # Left Batch Toolbar
+        left_toolbar = tk.Frame(left_frame, bg="#F8FAFC", padx=6, pady=4)
+        left_toolbar.pack(fill="x")
+
+        self.btn_approve_all = ttk.Button(
+            left_toolbar,
+            text="⚡ Setujui Semua (Prediksi Teratas)",
+            command=self._approve_all_items,
+        )
+        self.btn_approve_all.pack(fill="x", pady=2)
+
+        self.btn_approve_selected = ttk.Button(
+            left_toolbar,
+            text="✓ Setujui Item yang Dipilih",
+            command=self._approve_selected_items,
+        )
+        self.btn_approve_selected.pack(fill="x", pady=(2, 4))
+
         cols = ("hal", "alasan", "prediksi")
-        self.tree = ttk.Treeview(left_frame, columns=cols, show="headings", selectmode="browse")
+        self.tree = ttk.Treeview(left_frame, columns=cols, show="headings", selectmode="extended")
         self.tree.heading("hal", text="Halaman")
         self.tree.heading("alasan", text="Alasan Ragu")
         self.tree.heading("prediksi", text="Prediksi Teratas")
@@ -207,8 +232,33 @@ class ReviewDialog(tk.Toplevel):
         self.lbl_page_num = tk.Label(prev_nav, text="Hal -", font=("Segoe UI", 9), bg="#FFFFFF", fg="#64748B")
         self.lbl_page_num.pack(side="right", padx=4)
 
-        self.preview_canvas = tk.Label(prev_col, text="Pratinjau Halaman", bg="#F8FAFC", relief="solid", bd=1)
-        self.preview_canvas.pack(fill="both", expand=True, pady=4)
+        # Zoom Toolbar
+        zoom_bar = tk.Frame(prev_col, bg="#F1F5F9", relief="flat", bd=1, padx=4, pady=2)
+        zoom_bar.pack(fill="x", pady=(2, 4))
+
+        ttk.Button(zoom_bar, text="🔍 -", width=5, command=self._zoom_out).pack(side="left", padx=2)
+        ttk.Button(zoom_bar, text="100%", width=6, command=self._zoom_reset).pack(side="left", padx=2)
+        ttk.Button(zoom_bar, text="🔍 +", width=5, command=self._zoom_in).pack(side="left", padx=2)
+        ttk.Button(zoom_bar, text="⛶ Fit Lebar", width=10, command=self._zoom_fit_width).pack(side="left", padx=4)
+        self.lbl_zoom = tk.Label(zoom_bar, text="Fit Lebar", font=("Segoe UI", 9, "bold"), bg="#F1F5F9", fg="#1E40AF")
+        self.lbl_zoom.pack(side="left", padx=4)
+        tk.Label(zoom_bar, text="(Scroll / Ctrl+Scroll)", font=("Segoe UI", 8, "italic"), bg="#F1F5F9", fg="#64748B").pack(side="right", padx=4)
+
+        # Scrollable Canvas
+        canvas_container = tk.Frame(prev_col, bg="#F8FAFC", relief="solid", bd=1)
+        canvas_container.pack(fill="both", expand=True)
+
+        self.preview_canvas = tk.Canvas(canvas_container, bg="#CBD5E1", highlightthickness=0)
+        self.v_scrollbar = ttk.Scrollbar(canvas_container, orient="vertical", command=self.preview_canvas.yview)
+        self.h_scrollbar = ttk.Scrollbar(canvas_container, orient="horizontal", command=self.preview_canvas.xview)
+        self.preview_canvas.configure(xscrollcommand=self.h_scrollbar.set, yscrollcommand=self.v_scrollbar.set)
+
+        self.v_scrollbar.pack(side="right", fill="y")
+        self.h_scrollbar.pack(side="bottom", fill="x")
+        self.preview_canvas.pack(side="left", fill="both", expand=True)
+
+        self.preview_canvas.bind("<MouseWheel>", self._on_canvas_wheel)
+        self.preview_canvas.bind("<Control-MouseWheel>", self._on_canvas_ctrl_wheel)
 
         # Decision / Form col
         form_col = tk.Frame(content_box, bg="#FFFFFF")
@@ -267,11 +317,22 @@ class ReviewDialog(tk.Toplevel):
 
         self.btn_approve = ttk.Button(
             btn_box,
-            text="✓ Setujui & Simpan ke PDF",
+            text="✓ Setujui & Lanjut ke Berikutnya",
             style="Success.TButton",
             command=self._approve_item,
         )
         self.btn_approve.pack(fill="x", pady=2, ipady=6)
+
+        self.lbl_status_msg = tk.Label(
+            btn_box,
+            text="",
+            font=("Segoe UI", 9, "bold"),
+            bg="#FFFFFF",
+            fg="#059669",
+            wraplength=420,
+            justify="center",
+        )
+        self.lbl_status_msg.pack(fill="x", pady=2)
 
         self.btn_open_pdf = ttk.Button(
             btn_box,
@@ -280,7 +341,7 @@ class ReviewDialog(tk.Toplevel):
         )
         self.btn_open_pdf.pack(fill="x", pady=2)
 
-    def _load_data(self) -> None:
+    def _load_data(self, select_idx: int = 0) -> None:
         self.review_items = get_review_items(self.run_dir)
         for item in self.tree.get_children():
             self.tree.delete(item)
@@ -289,18 +350,32 @@ class ReviewDialog(tk.Toplevel):
             self.lbl_summary.configure(text=f"Folder Sesi: {self.run_dir.name} — ✓ Semua sertifikat telah tervalidasi!", fg="#059669")
             self.det_title.configure(text="Tidak ada sertifikat yang memerlukan review.")
             self.alert_box.configure(text="Semua sertifikat pada sesi pemotongan ini sudah berhasil dicocokkan 100%.")
-            self.preview_canvas.configure(image="", text="Tidak ada item.")
+            self.preview_canvas.delete("all")
+            self.preview_canvas.create_text(250, 150, text="✓ Tidak ada item yang memerlukan review.", fill="#059669", font=("Segoe UI", 11, "bold"))
+            self.btn_approve.configure(state="disabled")
+            if hasattr(self, "btn_approve_all"):
+                self.btn_approve_all.configure(state="disabled")
+            if hasattr(self, "btn_approve_selected"):
+                self.btn_approve_selected.configure(state="disabled")
             return
+
+        self.btn_approve.configure(state="normal")
+        if hasattr(self, "btn_approve_all"):
+            self.btn_approve_all.configure(state="normal")
+        if hasattr(self, "btn_approve_selected"):
+            self.btn_approve_selected.configure(state="normal")
 
         self.lbl_summary.configure(text=f"Folder Sesi: {self.run_dir.name} — ⚠️ Ada {len(self.review_items)} sertifikat butuh konfirmasi.", fg="#D97706")
         for idx, g in enumerate(self.review_items):
             pages_str = "-".join(str(p) for p in g.get("pages", []))
             reason = g.get("reason", "")
             cands = g.get("candidates", [])
-            top_cand = f"{cands[0]['nama']} ({cands[0].get('score', 0)}%)" if cands else "Tidak ada"
+            top_cand = f"{cands[0]['nama']} ({cands[0].get('score', 0)}%)" if cands else "Tidak ada di database"
             self.tree.insert("", "end", iid=str(idx), values=(f"Hal {pages_str}", reason, top_cand))
 
-        self.tree.selection_set("0")
+        target_idx = min(max(0, select_idx), len(self.review_items) - 1)
+        self.tree.selection_set(str(target_idx))
+        self.tree.see(str(target_idx))
         self._on_select_item(None)
 
     def _on_select_item(self, event: Any) -> None:
@@ -323,7 +398,7 @@ class ReviewDialog(tk.Toplevel):
         cands = grp.get("candidates", [])
         raw_name = grp.get("raw_name") or ""
 
-        if not cands or reason == "no confident holder":
+        if not cands or "tidak ditemukan di database" in reason.lower() or reason == "no confident holder":
             target_str = f"'{raw_name}'" if raw_name else "penerima sertifikat"
             msg = (
                 f"⚠️ Alasan Ragu: Nama Tidak Ditemukan di Database Master.\n"
@@ -402,6 +477,42 @@ class ReviewDialog(tk.Toplevel):
             self.nama_var.set(c.get("nama", ""))
             self.unit_var.set(c.get("unit", ""))
 
+    def _zoom_in(self) -> None:
+        self.fit_width_mode = False
+        self.zoom_level = min(3.0, round(self.zoom_level + 0.25, 2))
+        self.lbl_zoom.configure(text=f"{int(self.zoom_level * 100)}%")
+        self._render_page()
+
+    def _zoom_out(self) -> None:
+        self.fit_width_mode = False
+        self.zoom_level = max(0.3, round(self.zoom_level - 0.25, 2))
+        self.lbl_zoom.configure(text=f"{int(self.zoom_level * 100)}%")
+        self._render_page()
+
+    def _zoom_reset(self) -> None:
+        self.fit_width_mode = False
+        self.zoom_level = 1.0
+        self.lbl_zoom.configure(text="100%")
+        self._render_page()
+
+    def _zoom_fit_width(self) -> None:
+        self.fit_width_mode = True
+        self.zoom_level = 1.0
+        self.lbl_zoom.configure(text="Fit Lebar")
+        self._render_page()
+
+    def _on_canvas_wheel(self, event: Any) -> None:
+        if event.state & 0x0004:
+            self._on_canvas_ctrl_wheel(event)
+        else:
+            self.preview_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def _on_canvas_ctrl_wheel(self, event: Any) -> None:
+        if event.delta > 0:
+            self._zoom_in()
+        else:
+            self._zoom_out()
+
     def _render_page(self) -> None:
         if not self.selected_item:
             return
@@ -410,18 +521,34 @@ class ReviewDialog(tk.Toplevel):
             return
         try:
             plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
-            pdf_path = Path(plan_data.get("input_pdf", ""))
+            pdf_path = Path(self.selected_item.get("src_pdf") or plan_data.get("input_pdf", ""))
             pages = self.selected_item.get("pages", [self.current_preview_page])
             self.lbl_page_num.configure(text=f"Hal {self.current_preview_page} (dari {pages[0]}-{pages[-1]})")
 
-            png_bytes = render_page_image(pdf_path, self.current_preview_page, max_width=380)
+            self.preview_canvas.update_idletasks()
+            canvas_w = self.preview_canvas.winfo_width()
+            if self.fit_width_mode:
+                target_w = max(520, canvas_w - 30 if canvas_w > 100 else 750)
+                png_bytes = render_page_image(pdf_path, self.current_preview_page, max_width=target_w, zoom=1.0)
+            else:
+                target_w = max(520, canvas_w - 30 if canvas_w > 100 else 750)
+                png_bytes = render_page_image(pdf_path, self.current_preview_page, max_width=target_w, zoom=self.zoom_level)
+
             if png_bytes:
                 self.current_photo = tk.PhotoImage(data=png_bytes)
-                self.preview_canvas.configure(image=self.current_photo, text="")
+                self.preview_canvas.delete("all")
+                img_w = self.current_photo.width()
+                img_h = self.current_photo.height()
+                x_pos = max(img_w // 2, canvas_w // 2) if canvas_w > img_w else img_w // 2 + 10
+                y_pos = img_h // 2 + 10
+                self.canvas_img_id = self.preview_canvas.create_image(x_pos, y_pos, image=self.current_photo)
+                self.preview_canvas.configure(scrollregion=(0, 0, max(canvas_w, img_w + 30), img_h + 30))
             else:
-                self.preview_canvas.configure(image="", text="Gagal memuat pratinjau.")
+                self.preview_canvas.delete("all")
+                self.preview_canvas.create_text(250, 150, text="Gagal memuat pratinjau halaman.", fill="#64748B", font=("Segoe UI", 10))
         except Exception as e:
-            self.preview_canvas.configure(image="", text=f"Error preview: {e}")
+            self.preview_canvas.delete("all")
+            self.preview_canvas.create_text(250, 150, text=f"Error preview: {e}", fill="#DC2626", font=("Segoe UI", 10))
 
     def _prev_page(self) -> None:
         if not self.selected_item:
@@ -445,7 +572,7 @@ class ReviewDialog(tk.Toplevel):
             return
         try:
             plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
-            pdf_path = Path(plan_data.get("input_pdf", ""))
+            pdf_path = Path(self.selected_item.get("src_pdf") or plan_data.get("input_pdf", ""))
             if pdf_path.exists():
                 if sys.platform == "win32":
                     os.startfile(pdf_path)
@@ -468,6 +595,9 @@ class ReviewDialog(tk.Toplevel):
             messagebox.showwarning("Peringatan", "Nama Pegawai harus diisi untuk menyetujui.")
             return
 
+        sel = self.tree.selection()
+        curr_idx = int(sel[0]) if sel else 0
+
         try:
             file_name = approve_group(
                 run_dir=self.run_dir,
@@ -478,16 +608,141 @@ class ReviewDialog(tk.Toplevel):
                 custom_title=judul,
                 custom_year=tahun,
             )
-            messagebox.showinfo(
-                "Berhasil Disetujui",
-                f"Sertifikat berhasil disetujui!\n\n"
-                f"File PDF: {file_name}\n"
-                f"Rekap data.xlsx dan manifest_slice.xlsx telah otomatis diperbarui.",
-            )
-            self._load_data()
+            self._load_data(select_idx=curr_idx)
             self.parent_app._update_review_badge()
+            remaining = len(self.review_items)
+            rem_str = f"Tersisa {remaining} item." if remaining > 0 else "Semua sertifikat selesai disetujui!"
+            self.lbl_status_msg.configure(
+                text=f"✓ Disimpan: {file_name} ({rem_str})",
+                fg="#059669",
+            )
         except Exception as e:
             messagebox.showerror("Gagal Menyetujui", f"Error: {e}")
+
+    def _approve_all_items(self) -> None:
+        if not self.review_items:
+            return
+        n_items = len(self.review_items)
+        if not messagebox.askyesno(
+            "Konfirmasi Setujui Semua",
+            f"Apakah Anda yakin ingin menyetujui sekaligus seluruh {n_items} item review ini menggunakan data prediksi teratas masing-masing?",
+        ):
+            return
+
+        approved_count = 0
+        errors = []
+        for grp in list(self.review_items):
+            cands = grp.get("candidates", [])
+            if cands:
+                top_c = cands[0]
+                nid = top_c.get("nid", "")
+                nama = top_c.get("nama", "")
+                unit = top_c.get("unit", "")
+            else:
+                raw_name = grp.get("raw_name") or grp.get("nama", "")
+                nid = ""
+                nama = raw_name
+                unit = ""
+
+            fields = grp.get("fields", {})
+            judul = fields.get("title", {}).get("value") or "Tanpa Judul"
+            iss_date = fields.get("issue_date", {}).get("value")
+            tahun = iss_date.split("-")[0] if iss_date else "0000"
+
+            try:
+                approve_group(
+                    run_dir=self.run_dir,
+                    group_id=grp["id"],
+                    nid=nid,
+                    nama=nama,
+                    unit=unit,
+                    custom_title=judul,
+                    custom_year=tahun,
+                )
+                approved_count += 1
+            except Exception as e:
+                errors.append(f"Item #{grp.get('id')}: {e}")
+
+        self._load_data()
+        self.parent_app._update_review_badge()
+
+        if errors:
+            messagebox.showwarning(
+                "Selesai dengan Catatan",
+                f"{approved_count} dari {n_items} item berhasil disetujui.\nError pada {len(errors)} item:\n" + "\n".join(errors[:5]),
+            )
+        else:
+            self.lbl_status_msg.configure(
+                text=f"✓ Seluruh {approved_count} sertifikat berhasil disetujui!",
+                fg="#059669",
+            )
+            messagebox.showinfo(
+                "Selesai!",
+                f"✓ Seluruh {approved_count} sertifikat berhasil disetujui dan disimpan ke folder pdf/ serta file Excel!",
+            )
+
+    def _approve_selected_items(self) -> None:
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showinfo("Info", "Pilih satu atau beberapa item di daftar sebelah kiri terlebih dahulu.")
+            return
+
+        selected_indices = [int(s) for s in sel]
+        items_to_approve = [self.review_items[i] for i in selected_indices if i < len(self.review_items)]
+        if not items_to_approve:
+            return
+
+        n_items = len(items_to_approve)
+        if n_items == 1:
+            self._approve_item()
+            return
+
+        if not messagebox.askyesno(
+            "Konfirmasi Setujui Pilihan",
+            f"Setujui {n_items} item terpilih menggunakan data prediksi teratas masing-masing?",
+        ):
+            return
+
+        approved_count = 0
+        for grp in items_to_approve:
+            cands = grp.get("candidates", [])
+            if cands:
+                top_c = cands[0]
+                nid = top_c.get("nid", "")
+                nama = top_c.get("nama", "")
+                unit = top_c.get("unit", "")
+            else:
+                raw_name = grp.get("raw_name") or grp.get("nama", "")
+                nid = ""
+                nama = raw_name
+                unit = ""
+
+            fields = grp.get("fields", {})
+            judul = fields.get("title", {}).get("value") or "Tanpa Judul"
+            iss_date = fields.get("issue_date", {}).get("value")
+            tahun = iss_date.split("-")[0] if iss_date else "0000"
+
+            try:
+                approve_group(
+                    run_dir=self.run_dir,
+                    group_id=grp["id"],
+                    nid=nid,
+                    nama=nama,
+                    unit=unit,
+                    custom_title=judul,
+                    custom_year=tahun,
+                )
+                approved_count += 1
+            except Exception:
+                pass
+
+        curr_first = min(selected_indices) if selected_indices else 0
+        self._load_data(select_idx=curr_first)
+        self.parent_app._update_review_badge()
+        self.lbl_status_msg.configure(
+            text=f"✓ {approved_count} item terpilih berhasil disetujui!",
+            fg="#059669",
+        )
 
 
 # =========================================================================
@@ -496,13 +751,15 @@ class ReviewDialog(tk.Toplevel):
 class CertSliceApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Certificate Sorter - Solusi Pemotong & Pencocok Sertifikat Otomatis")
+        self.title("Certificate Manager - Solusi Pemotong, Penamaan & Manajemen Sertifikat Otomatis")
         self.geometry("980x740")
         self.minsize(860, 660)
 
         # Settings
         self.settings = load_user_settings()
         self.last_run_dir: Path | None = None
+        self.selected_pdf_files: list[Path] = []
+        self.input_display_var = tk.StringVar(value="Belum ada file/folder PDF dipilih")
 
         self._configure_styles()
         self._build_ui()
@@ -556,12 +813,12 @@ class CertSliceApp(tk.Tk):
         header = tk.Frame(self, bg="#FFFFFF", relief="solid", bd=1)
         header.pack(fill="x", padx=16, pady=(12, 6), ipady=6)
 
-        title_lbl = tk.Label(header, text="⚡ Certificate Sorter", font=("Segoe UI", 15, "bold"), fg="#1E40AF", bg="#FFFFFF")
+        title_lbl = tk.Label(header, text="Certificate Manager", font=("Segoe UI", 15, "bold"), fg="#1E40AF", bg="#FFFFFF")
         title_lbl.pack(anchor="w", padx=16, pady=(2, 0))
 
         sub_lbl = tk.Label(
             header,
-            text="Manajemen Pemotongan Bundel Sertifikat PDF & Pencocokan Database Pegawai Otomatis",
+            text="Sistem Pemrosesan, Penamaan Otomatis & Manajemen Sertifikat Terintegrasi Database Pegawai",
             font=("Segoe UI", 9),
             fg="#64748B",
             bg="#FFFFFF",
@@ -590,65 +847,64 @@ class CertSliceApp(tk.Tk):
         top_container = ttk.Frame(self.tab_mgmt)
         top_container.pack(fill="x", expand=False)
 
-        # Card 1: Dokumen Input & Database
+        # Card 1: Dokumen Input & Database Master
         card_input = ttk.LabelFrame(top_container, text=" 1. Dokumen Input & Database Master ", padding=12, style="Card.TLabelframe")
         card_input.pack(fill="x", pady=(0, 8))
 
-        # Database Excel (Pre-filled by default!)
-        ttk.Label(card_input, text="File Database Master (Excel):", font=("Segoe UI", 9, "bold"), background="#FFFFFF").grid(row=0, column=0, sticky="w", pady=4)
+        # Row 0: Input PDF / Folder
+        ttk.Label(card_input, text="File / Folder PDF Sertifikat:", font=("Segoe UI", 9, "bold"), background="#FFFFFF").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Entry(card_input, textvariable=self.input_display_var, width=48, state="readonly").grid(row=0, column=1, sticky="ew", padx=8, pady=4)
+
+        btn_box = ttk.Frame(card_input, style="Card.TFrame")
+        btn_box.grid(row=0, column=2, sticky="e", pady=4)
+        ttk.Button(btn_box, text="📄 Pilih File PDF...", style="Secondary.TButton", command=self._browse_files).pack(side="left", padx=(0, 4))
+        ttk.Button(btn_box, text="📁 Pilih 1 Folder...", style="Secondary.TButton", command=self._browse_dir).pack(side="left")
+
+        # Row 1: Database Excel (Pre-filled by default!)
+        ttk.Label(card_input, text="File Database Master (Excel):", font=("Segoe UI", 9, "bold"), background="#FFFFFF").grid(row=1, column=0, sticky="w", pady=4)
         default_db = get_default_database_path()
         self.db_var = tk.StringVar(value=default_db)
-        ttk.Entry(card_input, textvariable=self.db_var, width=64).grid(row=0, column=1, sticky="ew", padx=8, pady=4)
-        ttk.Button(card_input, text="Pilih Excel...", style="Secondary.TButton", command=self._browse_db).grid(row=0, column=2, pady=4)
+        ttk.Entry(card_input, textvariable=self.db_var, width=48).grid(row=1, column=1, sticky="ew", padx=8, pady=4)
+        ttk.Button(card_input, text="Pilih Excel...", style="Secondary.TButton", command=self._browse_db).grid(row=1, column=2, sticky="ew", pady=4)
 
-        # PDF Bundle
-        ttk.Label(card_input, text="File PDF Bundel Sertifikat:", font=("Segoe UI", 9, "bold"), background="#FFFFFF").grid(row=1, column=0, sticky="w", pady=4)
-        self.pdf_var = tk.StringVar()
-        ttk.Entry(card_input, textvariable=self.pdf_var, width=64).grid(row=1, column=1, sticky="ew", padx=8, pady=4)
-        ttk.Button(card_input, text="Pilih PDF...", style="Secondary.TButton", command=self._browse_pdf).grid(row=1, column=2, pady=4)
-
-        # Output folder (Pre-filled by default!)
+        # Row 2: Output folder (Pre-filled by default!)
         default_out = get_default_output_dir()
         ttk.Label(card_input, text="Folder Penyimpanan Hasil:", font=("Segoe UI", 9, "bold"), background="#FFFFFF").grid(row=2, column=0, sticky="w", pady=4)
         self.out_var = tk.StringVar(value=default_out)
-        ttk.Entry(card_input, textvariable=self.out_var, width=64).grid(row=2, column=1, sticky="ew", padx=8, pady=4)
-        ttk.Button(card_input, text="Pilih Folder...", style="Secondary.TButton", command=self._browse_out).grid(row=2, column=2, pady=4)
+        ttk.Entry(card_input, textvariable=self.out_var, width=48).grid(row=2, column=1, sticky="ew", padx=8, pady=4)
+        ttk.Button(card_input, text="Pilih Folder...", style="Secondary.TButton", command=self._browse_out).grid(row=2, column=2, sticky="ew", pady=4)
 
         card_input.columnconfigure(1, weight=1)
 
-        # Card 2: Pengaturan Pemrosesan
-        card_opts = ttk.LabelFrame(top_container, text=" 2. Opsi Pemrosesan ", padding=12, style="Card.TLabelframe")
+        # Card 2: Pengaturan Pemrosesan Otomatis
+        card_opts = ttk.LabelFrame(top_container, text=" 2. Opsi Pemrosesan Otomatis ", padding=12, style="Card.TLabelframe")
         card_opts.pack(fill="x", pady=(0, 8))
 
-        # Halaman per sertifikat
-        row_p = ttk.Frame(card_opts, style="Card.TFrame")
-        row_p.pack(fill="x", pady=2)
-        ttk.Label(row_p, text="Jumlah Halaman per Sertifikat:", font=("Segoe UI", 9, "bold"), background="#FFFFFF").pack(side="left")
-        self.pages_mode_var = tk.StringVar(value="auto")
-        cb_mode = ttk.Combobox(row_p, textvariable=self.pages_mode_var, values=["auto", "1", "2"], state="readonly", width=8)
-        cb_mode.pack(side="left", padx=8)
-        ttk.Label(row_p, text="(Pilih 'auto' untuk deteksi lampiran otomatis, atau '2' jika pasti 2 halaman)", font=("Segoe UI", 8), foreground="#64748B", background="#FFFFFF").pack(side="left")
-
-        # OCR Checkbox
-        row_ocr = ttk.Frame(card_opts, style="Card.TFrame")
-        row_ocr.pack(fill="x", pady=(6, 2))
-        self.ocr_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(row_ocr, text="Gunakan Pembaca Teks Gambar (OCR)", variable=self.ocr_var).pack(side="left")
-        ttk.Label(row_ocr, text="— Aktifkan jika sertifikat berasal dari scan gambar/foto (Disarankan selalu aktif)", font=("Segoe UI", 8), foreground="#64748B", background="#FFFFFF").pack(side="left", padx=8)
+        # Format notice
+        row_fmt = ttk.Frame(card_opts, style="Card.TFrame")
+        row_fmt.pack(fill="x", pady=(0, 6))
+        ttk.Label(
+            row_fmt,
+            text="💡 Format Otomatis: SKP ➔ {NID}_{Nama}_{Level}_{Peran}.pdf  |  Sertifikat Standar ➔ {NID}_{Nama}_{Judul}.pdf",
+            font=("Segoe UI", 9, "bold"),
+            foreground="#1D4ED8",
+            background="#EFF6FF",
+            padding=(8, 4),
+        ).pack(fill="x")
 
         # AI Mode Checkbox
         row_ai = ttk.Frame(card_opts, style="Card.TFrame")
         row_ai.pack(fill="x", pady=2)
         self.ai_var = tk.BooleanVar(value=bool(self.settings.get("use_ai", True)))
-        ttk.Checkbutton(row_ai, text="Aktifkan Mode AI (Gemini Flash) untuk Hasil Lebih Akurat", variable=self.ai_var).pack(side="left")
+        ttk.Checkbutton(row_ai, text="Aktifkan Mode AI (Gemini Flash-Lite Cerdas & Hemat Kuota)", variable=self.ai_var).pack(side="left")
         ttk.Label(row_ai, text="— Menyelamatkan nama singkatan, terpotong, atau typo dengan AI", font=("Segoe UI", 8), foreground="#64748B", background="#FFFFFF").pack(side="left", padx=8)
 
-        # Dry Run Checkbox
-        row_dry = ttk.Frame(card_opts, style="Card.TFrame")
-        row_dry.pack(fill="x", pady=2)
-        self.dry_run_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(row_dry, text="Mode Uji Coba Saja (Simulasi)", variable=self.dry_run_var).pack(side="left")
-        ttk.Label(row_dry, text="— Hanya menganalisis kecocokan nama tanpa memotong file fisik PDF ke disk", font=("Segoe UI", 8), foreground="#64748B", background="#FFFFFF").pack(side="left", padx=8)
+        # OCR Checkbox
+        self.row_ocr = ttk.Frame(card_opts, style="Card.TFrame")
+        self.row_ocr.pack(fill="x", pady=(2, 2))
+        self.ocr_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(self.row_ocr, text="Gunakan Pembaca Teks Gambar (OCR Otomatis)", variable=self.ocr_var).pack(side="left")
+        ttk.Label(self.row_ocr, text="— Membaca sertifikat scan foto/gambar secara akurat (Disarankan selalu aktif)", font=("Segoe UI", 8), foreground="#64748B", background="#FFFFFF").pack(side="left", padx=8)
 
         # Action Buttons Bar
         act_bar = ttk.Frame(top_container)
@@ -656,7 +912,7 @@ class CertSliceApp(tk.Tk):
 
         self.btn_run = ttk.Button(
             act_bar,
-            text="⚡ Mulai Proses Pemotongan",
+            text="⚡ Mulai Proses Otomatis (Potong Bundel & Rename Massal)",
             style="Primary.TButton",
             command=self._start_processing,
         )
@@ -737,16 +993,24 @@ class CertSliceApp(tk.Tk):
         model_row = ttk.Frame(card_api, style="Card.TFrame")
         model_row.pack(fill="x", pady=6)
         ttk.Label(model_row, text="Pilihan Model Gemini:", font=("Segoe UI", 9, "bold"), background="#FFFFFF", width=22).pack(side="left")
-        self.model_var = tk.StringVar(value=self.settings.get("gemini_model", "gemini-2.0-flash-lite"))
+        self.model_var = tk.StringVar(value=self.settings.get("gemini_model", "gemini-flash-lite-latest"))
         cb_model = ttk.Combobox(
             model_row,
             textvariable=self.model_var,
-            values=["gemini-2.0-flash-lite", "gemini-2.5-flash", "gemini-1.5-flash"],
+            values=["gemini-flash-lite-latest", "gemini-2.5-flash-lite", "gemini-2.5-flash"],
             state="readonly",
             width=26,
         )
         cb_model.pack(side="left", padx=6)
-        ttk.Label(model_row, text="(Model 2.0 Flash-Lite sangat cepat dan hemat kuota)", font=("Segoe UI", 8), foreground="#64748B", background="#FFFFFF").pack(side="left", padx=6)
+        ttk.Label(model_row, text="★ Rekomendasi: Flash-Lite (Hemat Kuota)", font=("Segoe UI", 8, "bold"), foreground="#047857", background="#FFFFFF").pack(side="left", padx=6)
+
+        info_quota = (
+            "💡 Info Kuota Google AI Studio (Free Tier):\n"
+            "• Sangat disarankan memakai 'gemini-flash-lite-latest' (Batas kuota gratis: 500-1500 request/hari, ultra cepat & hemat token).\n"
+            "• Hindari 'gemini-2.5-flash' standar jika di tier gratis karena dibatasi hanya 20 request/hari (RPD), "
+            "sehingga cepat muncul peringatan 'You're nearing a rate limit'."
+        )
+        ttk.Label(card_api, text=info_quota, justify="left", font=("Segoe UI", 8), foreground="#0369A1", background="#F0F9FF", padding=6).pack(fill="x", pady=(4, 0))
 
         # Default paths configuration
         card_paths = ttk.LabelFrame(container, text=" Jalur Berkas Default ", padding=14, style="Card.TLabelframe")
@@ -813,13 +1077,29 @@ class CertSliceApp(tk.Tk):
         )
         messagebox.showinfo("Tersimpan", "Pengaturan berhasil disimpan dengan aman di profil komputer Anda.")
 
-    def _browse_pdf(self) -> None:
-        f = filedialog.askopenfilename(
-            title="Pilih File PDF Bundel Sertifikat",
+    def _browse_files(self) -> None:
+        files = filedialog.askopenfilenames(
+            title="Pilih File PDF Sertifikat atau Bundel",
             filetypes=[("PDF Files", "*.pdf"), ("All Files", "*.*")],
         )
-        if f:
-            self.pdf_var.set(f)
+        if files:
+            self.selected_pdf_files = [Path(f) for f in files]
+            if len(self.selected_pdf_files) == 1:
+                p = self.selected_pdf_files[0]
+                self.input_display_var.set(f"📄 1 File: {p.name}")
+            else:
+                self.input_display_var.set(f"📁 {len(self.selected_pdf_files)} file PDF dipilih")
+
+    def _browse_dir(self) -> None:
+        d = filedialog.askdirectory(title="Pilih Folder Berisi File PDF Sertifikat")
+        if d:
+            folder = Path(d)
+            pdfs = sorted(list(folder.glob("*.pdf")))
+            if not pdfs:
+                messagebox.showwarning("Peringatan", f"Tidak ditemukan file PDF di folder:\n{d}")
+                return
+            self.selected_pdf_files = pdfs
+            self.input_display_var.set(f"📁 Folder: {folder.name} ({len(pdfs)} file PDF)")
 
     def _browse_db(self) -> None:
         f = filedialog.askopenfilename(
@@ -844,7 +1124,7 @@ class CertSliceApp(tk.Tk):
 
     def _open_review_dialog(self) -> None:
         if not self.last_run_dir or not self.last_run_dir.exists():
-            messagebox.showinfo("Info", "Belum ada sesi pemotongan yang dijalankan.")
+            messagebox.showinfo("Info", "Belum ada sesi pemrosesan yang dijalankan.")
             return
         ReviewDialog(self, self.last_run_dir)
 
@@ -860,36 +1140,27 @@ class CertSliceApp(tk.Tk):
             self.btn_review.configure(state="normal", text="✓ Review Selesai (Semua Cocok)")
 
     # =========================================================================
-    # BACKGROUND WORKER
+    # BACKGROUND WORKER (UNIFIED BUNDLE SLICER & MASS RENAMER)
     # =========================================================================
     def _start_processing(self) -> None:
         try:
-            pdf_str = self.pdf_var.get().strip()
             db_str = self.db_var.get().strip()
             out_str = self.out_var.get().strip()
 
-            if not pdf_str:
-                messagebox.showwarning("Peringatan", "Silakan pilih file PDF bundel sertifikat terlebih dahulu.")
+            if not self.selected_pdf_files:
+                messagebox.showwarning("Peringatan", "Silakan pilih file PDF (satu bundel / banyak file) atau 1 folder terlebih dahulu.")
                 return
 
             if not db_str:
                 messagebox.showwarning("Peringatan", "Silakan pilih file database master Excel terlebih dahulu.")
                 return
 
-            pdf_file = Path(pdf_str)
             db_file = Path(db_str)
             out_dir = Path(out_str)
-
-            if not pdf_file.exists() or not pdf_file.is_file():
-                messagebox.showerror("Error", f"File PDF bundel sertifikat tidak ditemukan:\n{pdf_str}")
-                return
 
             if not db_file.exists() or not db_file.is_file():
                 messagebox.showerror("Error", f"File database Excel tidak ditemukan:\n{db_str}")
                 return
-
-            # Generate human-friendly folder name
-            run_name = make_human_friendly_run_name(pdf_file)
 
             # Save settings
             save_user_settings(
@@ -900,54 +1171,53 @@ class CertSliceApp(tk.Tk):
                 default_out_path=str(out_dir),
             )
 
+            if len(self.selected_pdf_files) == 1:
+                run_name = make_human_friendly_run_name(self.selected_pdf_files[0])
+            else:
+                run_name = f"Hasil_Proses_{len(self.selected_pdf_files)}_Item_{datetime.now().strftime('%d-%b-%Y_%H.%M')}"
+
             self.btn_run.configure(state="disabled")
             self.btn_open_out.configure(state="disabled")
             self.btn_review.configure(state="disabled")
             self.progress_bar.pack(side="left", padx=12)
             self.progress_bar.start(10)
-
-            threading.Thread(target=self._run_pipeline_worker, args=(pdf_file, db_file, out_dir, run_name), daemon=True).start()
+            threading.Thread(
+                target=self._run_unified_worker,
+                args=(self.selected_pdf_files, db_file, out_dir, run_name),
+                daemon=True,
+            ).start()
         except Exception as e:
             messagebox.showerror("Error", f"Gagal memulai proses:\n{e}")
 
-    def _run_pipeline_worker(self, pdf_file: Path, db_file: Path, out_dir: Path, run_name: str) -> None:
-        pages_mode = self.pages_mode_var.get()
-        ocr_enabled = self.ocr_var.get()
-        dry_run = self.dry_run_var.get()
+    def _run_unified_worker(self, pdf_files: list[Path], db_file: Path, out_dir: Path, run_name: str) -> None:
         use_ai = self.ai_var.get()
         api_key = self.api_key_var.get().strip() or None
         model = self.model_var.get().strip()
 
         logger = logging.getLogger("certslice")
         logger.info("==================================================")
-        logger.info("Memulai Proses Pemotongan: %s", pdf_file.name)
+        logger.info("Memulai Proses Otomatis: %d berkas PDF", len(pdf_files))
         logger.info("Database Master: %s", db_file.name)
         logger.info("Folder Output: %s", run_name)
-        logger.info("Mode Halaman: %s | OCR: %s | Mode AI: %s | Simulasi: %s", pages_mode, ocr_enabled, use_ai, dry_run)
+        logger.info("Mode AI: %s | Model: %s", use_ai, model)
         logger.info("==================================================")
+
+        def cb(curr: int, tot: int, name: str):
+            logger.info("Progress (%d/%d): %s", curr, tot, name)
 
         res = None
         error_msg = None
         try:
-            res = pipeline.run(
-                pdf_path=pdf_file,
+            res = process_bulk_files(
+                pdf_paths=pdf_files,
                 db_path=db_file,
                 out_dir=out_dir,
-                pages_per_cert=pages_mode,
-                ocr=ocr_enabled,
-                dry_run=dry_run,
                 use_ai=use_ai,
                 gemini_api_key=api_key,
                 gemini_model=model,
                 run_name=run_name,
+                progress_callback=cb,
             )
-
-            # Copy manifest_slice.xlsx to data.xlsx for easy access
-            if res and res.run_dir and not dry_run:
-                manifest_path = res.run_dir / "manifest_slice.xlsx"
-                if manifest_path.exists():
-                    shutil.copy2(manifest_path, res.run_dir / "data.xlsx")
-                    logger.info("Rekap data.xlsx berhasil dibuat di folder hasil.")
         except Exception as e:
             error_msg = str(e)
             logger.error("Terjadi kesalahan: %s", error_msg, exc_info=True)
@@ -966,15 +1236,15 @@ class CertSliceApp(tk.Tk):
         if res:
             self.last_run_dir = res.run_dir
             self.btn_open_out.configure(state="normal")
-            summary = res.summary
-            accepted = summary.get("accepted", 0)
-            unmatched = summary.get("unmatched", 0)
-            total = summary.get("pages", 0)
+
+            total = res.total_files
+            accepted = res.accepted_count
+            unmatched = res.review_count
 
             logger = logging.getLogger("certslice")
             logger.info("==================================================")
             logger.info("PROSES SELESAI!")
-            logger.info("Total Halaman: %d | Cocok Pasti: %d | Butuh Review: %d", total, accepted, unmatched)
+            logger.info("Total Sertifikat: %d | Cocok Pasti: %d | Butuh Review: %d", total, accepted, unmatched)
             logger.info("Folder Hasil: %s", res.run_dir)
             logger.info("==================================================")
 
@@ -982,11 +1252,11 @@ class CertSliceApp(tk.Tk):
 
             if unmatched > 0:
                 ans = messagebox.askyesno(
-                    "Pemotongan Berhasil (Perlu Review)",
-                    f"Pemotongan selesai!\n\n"
+                    "Proses Selesai (Perlu Review)",
+                    f"Proses sertifikat selesai!\n\n"
                     f"✓ Cocok Pasti: {accepted} sertifikat\n"
                     f"⚠️ Butuh Review/Konfirmasi: {unmatched} sertifikat\n\n"
-                    f"Catatan: Sertifikat yang butuh review tetap dipotong dengan awalan [REVIEW].\n\n"
+                    f"Catatan: Sertifikat yang butuh review tersimpan rapi dengan awalan [REVIEW].\n\n"
                     f"Apakah Anda ingin membuka menu Review & Koreksi sekarang untuk memeriksa dan menyetujuinya?",
                 )
                 if ans:
@@ -994,9 +1264,9 @@ class CertSliceApp(tk.Tk):
             else:
                 messagebox.showinfo(
                     "Sukses Sempurna",
-                    f"Pemotongan selesai dengan 100% kecocokan!\n\n"
-                    f"✓ Seluruh {accepted} sertifikat berhasil dicocokkan dan dipotong.\n"
-                    f"File hasil dan data.xlsx tersimpan rapi di:\n{res.run_dir}",
+                    f"Proses selesai dengan 100% kecocokan!\n\n"
+                    f"✓ Seluruh {accepted} sertifikat berhasil dicocokkan dan diproses.\n"
+                    f"File hasil dan file rekap 'data.xlsx' tersimpan rapi di:\n{res.run_dir}",
                 )
 
 

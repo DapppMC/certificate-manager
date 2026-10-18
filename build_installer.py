@@ -22,7 +22,7 @@ def main() -> None:
         "--onedir",
         "--windowed",
         "--name",
-        "CertificateSlicer",
+        "CertificateManager",
         "--add-data",
         f"{config_file};certslice",
         "--collect-all",
@@ -36,8 +36,8 @@ def main() -> None:
     print("Command:", " ".join(cmd))
     res = subprocess.run(cmd, cwd=root)
     if res.returncode == 0:
-        dist_dir = root / "dist" / "CertificateSlicer"
-        exe_file = dist_dir / "CertificateSlicer.exe"
+        dist_dir = root / "dist" / "CertificateManager"
+        exe_file = dist_dir / "CertificateManager.exe"
         print("\n=======================================================")
         print("BUILD SUCCEEDED!")
         print(f"Aplikasi EXE siap digunakan di:")
