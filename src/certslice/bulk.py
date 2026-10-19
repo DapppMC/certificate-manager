@@ -824,6 +824,7 @@ def prepare_cert_jobs(
     ocr_engine: OcrEngine,
     pages_per_cert: str = "auto",
     text_cache: dict[tuple[str, int], str] | None = None,
+    progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> tuple[list[CertJob], list[Path], list[dict[str, Any]], list[tuple[Path, str]]]:
     """Scan input PDFs: separate roster docs and auxiliary attachments, detect 1/2/3-page certs vs bundles, and build CertJobs."""
     if text_cache is None:
@@ -888,32 +889,59 @@ def prepare_cert_jobs(
                 jobs.append(CertJob(job_id=len(jobs) + 1, src_pdf=pdf_path, pages=[0, 1], is_bundle=False))
         else:
             # Multi-page bundle or multi-page certificate (>2 pages)
-            infos = []
-            for p_idx in range(n_pages):
-                page = doc[p_idx]
-                t = _get_page_text_cached(doc, p_idx, pdf_path, ocr_engine, text_cache)
-                lines = [l.strip() for l in t.splitlines() if l.strip()]
-                raw_cands = page_candidates(lines, employees, cfg)
-                cands = cue_filter(raw_cands, lines, cfg)
-                st, top, r = decide(cands, employees, cfg)
-                is_start = bool(cands and cands[0].score >= accept_score)
-                folded = fold(t).lower()
-                cont = (
-                    any(re.search(pat, folded, re.I) for pat in continuation_patterns)
-                    or any(kw in folded for kw in EXTENDED_CONTINUATION_KEYWORDS)
-                )
-                if not is_start and not cont:
-                    if not cands or cands[0].score < 85:
-                        cont = True
-                infos.append(
-                    PageInfo(
+            # Parallelize page analysis with adaptive worker count and real-time progress
+            workers = get_optimal_worker_count()
+            completed_bundle_pages = 0
+            page_progress_lock = threading.Lock()
+
+            def _analyze_bundle_page(p_idx: int) -> tuple[int, PageInfo]:
+                nonlocal completed_bundle_pages
+                local_doc = pymupdf.open(pdf_path)
+                try:
+                    page = local_doc[p_idx]
+                    t = _get_page_text_cached(local_doc, p_idx, pdf_path, ocr_engine, text_cache)
+                    lines = [l.strip() for l in t.splitlines() if l.strip()]
+                    raw_cands = page_candidates(lines, employees, cfg)
+                    cands = cue_filter(raw_cands, lines, cfg)
+                    st, top, r = decide(cands, employees, cfg)
+                    is_start = bool(cands and cands[0].score >= accept_score)
+                    folded = fold(t).lower()
+                    cont = (
+                        any(re.search(pat, folded, re.I) for pat in continuation_patterns)
+                        or any(kw in folded for kw in EXTENDED_CONTINUATION_KEYWORDS)
+                    )
+                    if not is_start and not cont:
+                        if not cands or cands[0].score < 85:
+                            cont = True
+                    p_info = PageInfo(
                         decision=(st, top, r),
                         is_start=is_start,
                         number=None,
                         continuation=cont,
                         source="text" if page.get_text().strip() else "ocr",
                     )
-                )
+                finally:
+                    local_doc.close()
+
+                with page_progress_lock:
+                    completed_bundle_pages += 1
+                    if progress_callback:
+                        progress_callback(
+                            completed_bundle_pages,
+                            n_pages,
+                            f"Memindai halaman bundel ({completed_bundle_pages}/{n_pages}): {pdf_path.name}",
+                        )
+                return p_idx, p_info
+
+            if n_pages <= 2 or workers <= 1:
+                page_results = [_analyze_bundle_page(p) for p in range(n_pages)]
+            else:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                    page_results = list(executor.map(_analyze_bundle_page, list(range(n_pages))))
+
+            page_results.sort(key=lambda x: x[0])
+            infos = [p_info for _, p_info in page_results]
+
             raw_groups = group_pages(infos, employees, pages_per_cert, cfg)
             # If all pages form a single group covering the whole document, it is a single multi-page cert
             is_single_doc = (len(raw_groups) == 1 and len(raw_groups[0]["pages"]) == n_pages)
@@ -1201,7 +1229,7 @@ def process_bulk_files(
 
     # Step 1: Deconstruct into CertJobs & Roster docs
     jobs, roster_paths, roster_entries, aux_paths = prepare_cert_jobs(
-        pdf_paths, employees, cfg, ocr_engine, text_cache=text_cache
+        pdf_paths, employees, cfg, ocr_engine, text_cache=text_cache, progress_callback=progress_callback
     )
     total_jobs = len(jobs)
 
