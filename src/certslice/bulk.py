@@ -1162,11 +1162,12 @@ def process_bulk_files(
     gemini_model: str = "gemini-flash-lite-latest",
     run_name: str | None = None,
     progress_callback: Callable[[int, int, str], None] | None = None,
+    use_ocr: bool = True,
 ) -> BulkResult:
     """Unified smart processor: handles 1 bundle, 20+ single files, or mixed folders with automatic roster enrichment."""
     cfg = load_config(None)
     employees = load_employees(db_path, cfg)
-    ocr_engine = OcrEngine(dpi=130)
+    ocr_engine = OcrEngine(dpi=130) if use_ocr else None
 
     if use_ai and not gemini_api_key:
         settings = load_user_settings()

@@ -1,8 +1,9 @@
 @echo off
 title Certificate Manager
+cd /d "%~dp0"
 echo Membuka Certificate Manager...
 
-:: Unblock all files in this folder automatically (removes Mark of the Web if downloaded from internet)
+:: Otomatis unblock seluruh file di folder ini jika diunduh dari internet
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -Path '%~dp0' -Recurse | Unblock-File" 2>nul
 
 if exist "%~dp0CertificateManager.exe" (

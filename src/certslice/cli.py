@@ -42,7 +42,18 @@ def main(argv: list[str] | None = None) -> int:
     # Subcommand: gui
     subparsers.add_parser("gui", help="Launch desktop graphical user interface")
 
+    # Subcommand: web
+    web_parser = subparsers.add_parser("web", help="Launch web interface in browser")
+    web_parser.add_argument("--port", type=int, default=8250, help="Port to run web server (default: 8250)")
+    web_parser.add_argument("--host", default="0.0.0.0", help="Host interface (default: 0.0.0.0)")
+    web_parser.add_argument("--no-browser", action="store_true", help="Do not automatically open browser")
+
     args = parser.parse_args(argv)
+
+    if args.subcommand == "web":
+        from certslice.web import launch_web
+        launch_web(host=args.host, port=args.port, open_browser=not args.no_browser)
+        return 0
 
     if args.subcommand == "gui":
         from certslice.gui import launch_gui

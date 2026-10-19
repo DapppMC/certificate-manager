@@ -35,6 +35,42 @@ from certslice.gemini import load_user_settings, save_user_settings
 from certslice import pipeline
 from certslice.reviewer import get_review_items, render_page_image, approve_group
 
+UI_FONT = "Noto Sans" if sys.platform != "win32" else "Segoe UI"
+MONO_FONT = "Noto Sans Mono" if sys.platform != "win32" else "Consolas"
+
+
+def configure_global_fonts(root: Any) -> None:
+    """Configure crisp anti-aliased fonts globally for Tkinter using available modern system fonts."""
+    global UI_FONT, MONO_FONT
+    try:
+        import tkinter.font as tkfont
+        available = set(tkfont.families(root))
+        for candidate in ["Noto Sans", "DejaVu Sans", "Liberation Sans", "Cantarell", "Ubuntu", "Segoe UI", "Arial"]:
+            if candidate in available:
+                UI_FONT = candidate
+                break
+        for candidate in ["Noto Sans Mono", "DejaVu Sans Mono", "Liberation Mono", "Consolas", "Courier New"]:
+            if candidate in available:
+                MONO_FONT = candidate
+                break
+
+        for name in ["TkDefaultFont", "TkTextFont", "TkMenuFont"]:
+            try:
+                tkfont.nametofont(name).configure(family=UI_FONT, size=10)
+            except Exception:
+                pass
+        for name in ["TkHeadingFont", "TkCaptionFont"]:
+            try:
+                tkfont.nametofont(name).configure(family=UI_FONT, size=11, weight="bold")
+            except Exception:
+                pass
+        try:
+            tkfont.nametofont("TkFixedFont").configure(family=MONO_FONT, size=10)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
 
 def get_default_database_path() -> str:
     """Find default database path from settings, application directory, or common folders."""
@@ -135,6 +171,7 @@ class ReviewDialog(tk.Toplevel):
         self.transient(parent)
         self.lift()
         self.focus_force()
+        configure_global_fonts(self)
 
         self.review_items: list[dict[str, Any]] = []
         self.selected_item: dict[str, Any] | None = None
@@ -152,13 +189,13 @@ class ReviewDialog(tk.Toplevel):
         header = tk.Frame(self, bg="#FFFFFF", relief="solid", bd=1)
         header.pack(fill="x", padx=12, pady=(12, 8), ipady=6)
 
-        title_lbl = tk.Label(header, text="🔍 Review & Koreksi Hasil Pemotongan", font=("Segoe UI", 12, "bold"), fg="#1E40AF", bg="#FFFFFF")
+        title_lbl = tk.Label(header, text="🔍 Review & Koreksi Hasil Pemotongan", font=(UI_FONT, 12, "bold"), fg="#1E40AF", bg="#FFFFFF")
         title_lbl.pack(anchor="w", padx=12)
 
         self.lbl_summary = tk.Label(
             header,
             text=f"Folder Sesi: {self.run_dir.name}",
-            font=("Segoe UI", 9),
+            font=(UI_FONT, 9),
             fg="#64748B",
             bg="#FFFFFF",
         )
@@ -172,7 +209,7 @@ class ReviewDialog(tk.Toplevel):
         left_frame = tk.Frame(paned, bg="#FFFFFF", relief="solid", bd=1)
         paned.add(left_frame, minsize=320, width=370)
 
-        tk.Label(left_frame, text="📋 Daftar yang Perlu Dicek", font=("Segoe UI", 10, "bold"), bg="#F8FAFC", fg="#1E293B", pady=8).pack(fill="x")
+        tk.Label(left_frame, text="📋 Daftar yang Perlu Dicek", font=(UI_FONT, 10, "bold"), bg="#F8FAFC", fg="#1E293B", pady=8).pack(fill="x")
 
         # Left Batch Toolbar
         left_toolbar = tk.Frame(left_frame, bg="#F8FAFC", padx=6, pady=4)
@@ -213,7 +250,7 @@ class ReviewDialog(tk.Toplevel):
         paned.add(right_frame, minsize=540)
 
         # Top bar of right frame
-        self.det_title = tk.Label(right_frame, text="Pilih salah satu item di sebelah kiri", font=("Segoe UI", 10, "bold"), bg="#F8FAFC", fg="#1E293B", pady=8)
+        self.det_title = tk.Label(right_frame, text="Pilih salah satu item di sebelah kiri", font=(UI_FONT, 10, "bold"), bg="#F8FAFC", fg="#1E293B", pady=8)
         self.det_title.pack(fill="x")
 
         # Two columns inside right frame: Preview on left, Form on right
@@ -226,13 +263,13 @@ class ReviewDialog(tk.Toplevel):
 
         prev_nav = tk.Frame(prev_col, bg="#FFFFFF")
         prev_nav.pack(fill="x", pady=2)
-        tk.Label(prev_nav, text="Pratinjau Halaman PDF:", font=("Segoe UI", 9, "bold"), bg="#FFFFFF").pack(side="left")
+        tk.Label(prev_nav, text="Pratinjau Halaman PDF:", font=(UI_FONT, 9, "bold"), bg="#FFFFFF").pack(side="left")
 
         self.btn_prev_p = ttk.Button(prev_nav, text="◀ Hal Sblm", width=10, command=self._prev_page)
         self.btn_prev_p.pack(side="right", padx=2)
         self.btn_next_p = ttk.Button(prev_nav, text="Hal Brkt ▶", width=10, command=self._next_page)
         self.btn_next_p.pack(side="right", padx=2)
-        self.lbl_page_num = tk.Label(prev_nav, text="Hal -", font=("Segoe UI", 9), bg="#FFFFFF", fg="#64748B")
+        self.lbl_page_num = tk.Label(prev_nav, text="Hal -", font=(UI_FONT, 9), bg="#FFFFFF", fg="#64748B")
         self.lbl_page_num.pack(side="right", padx=4)
 
         # Zoom Toolbar
@@ -243,9 +280,9 @@ class ReviewDialog(tk.Toplevel):
         ttk.Button(zoom_bar, text="100%", width=6, command=self._zoom_reset).pack(side="left", padx=2)
         ttk.Button(zoom_bar, text="🔍 +", width=5, command=self._zoom_in).pack(side="left", padx=2)
         ttk.Button(zoom_bar, text="⛶ Fit Lebar", width=10, command=self._zoom_fit_width).pack(side="left", padx=4)
-        self.lbl_zoom = tk.Label(zoom_bar, text="Fit Lebar", font=("Segoe UI", 9, "bold"), bg="#F1F5F9", fg="#1E40AF")
+        self.lbl_zoom = tk.Label(zoom_bar, text="Fit Lebar", font=(UI_FONT, 9, "bold"), bg="#F1F5F9", fg="#1E40AF")
         self.lbl_zoom.pack(side="left", padx=4)
-        tk.Label(zoom_bar, text="(Scroll / Ctrl+Scroll)", font=("Segoe UI", 8, "italic"), bg="#F1F5F9", fg="#64748B").pack(side="right", padx=4)
+        tk.Label(zoom_bar, text="(Scroll / Ctrl+Scroll)", font=(UI_FONT, 8, "italic"), bg="#F1F5F9", fg="#64748B").pack(side="right", padx=4)
 
         # Scrollable Canvas
         canvas_container = tk.Frame(prev_col, bg="#F8FAFC", relief="solid", bd=1)
@@ -271,7 +308,7 @@ class ReviewDialog(tk.Toplevel):
         self.alert_box = tk.Label(
             form_col,
             text="Pilih item di sebelah kiri.",
-            font=("Segoe UI", 9),
+            font=(UI_FONT, 9),
             bg="#FEF3C7",
             fg="#92400E",
             wraplength=340,
@@ -284,7 +321,7 @@ class ReviewDialog(tk.Toplevel):
         self.alert_box.pack(fill="x", pady=(0, 8))
 
         # Prediction / Candidate recommendation
-        tk.Label(form_col, text="Prediksi Rekomendasi dari Database Master:", font=("Segoe UI", 9, "bold"), bg="#FFFFFF").pack(anchor="w")
+        tk.Label(form_col, text="Prediksi Rekomendasi dari Database Master:", font=(UI_FONT, 9, "bold"), bg="#FFFFFF").pack(anchor="w")
         self.candidates_frame = tk.Frame(form_col, bg="#FFFFFF")
         self.candidates_frame.pack(fill="x", pady=4)
         self.cand_idx_var = tk.IntVar(value=-1)
@@ -329,7 +366,7 @@ class ReviewDialog(tk.Toplevel):
         self.lbl_status_msg = tk.Label(
             btn_box,
             text="",
-            font=("Segoe UI", 9, "bold"),
+            font=(UI_FONT, 9, "bold"),
             bg="#FFFFFF",
             fg="#059669",
             wraplength=420,
@@ -354,7 +391,7 @@ class ReviewDialog(tk.Toplevel):
             self.det_title.configure(text="Tidak ada sertifikat yang memerlukan review.")
             self.alert_box.configure(text="Semua sertifikat pada sesi pemotongan ini sudah berhasil dicocokkan 100%.")
             self.preview_canvas.delete("all")
-            self.preview_canvas.create_text(250, 150, text="✓ Tidak ada item yang memerlukan review.", fill="#059669", font=("Segoe UI", 11, "bold"))
+            self.preview_canvas.create_text(250, 150, text="✓ Tidak ada item yang memerlukan review.", fill="#059669", font=(UI_FONT, 11, "bold"))
             self.btn_approve.configure(state="disabled")
             if hasattr(self, "btn_approve_all"):
                 self.btn_approve_all.configure(state="disabled")
@@ -443,7 +480,7 @@ class ReviewDialog(tk.Toplevel):
                     justify="left",
                     anchor="w",
                     bg="#FFFFFF",
-                    font=("Segoe UI", 9),
+                    font=(UI_FONT, 9),
                     command=self._on_cand_chosen,
                 )
                 rb.pack(fill="x", pady=2)
@@ -455,7 +492,7 @@ class ReviewDialog(tk.Toplevel):
                 bg="#FFFFFF",
                 fg="#DC2626",
                 justify="left",
-                font=("Segoe UI", 9, "bold"),
+                font=(UI_FONT, 9, "bold"),
             ).pack(anchor="w", pady=4)
             self.nama_var.set(raw_name)
             self.nid_var.set("")
@@ -548,10 +585,10 @@ class ReviewDialog(tk.Toplevel):
                 self.preview_canvas.configure(scrollregion=(0, 0, max(canvas_w, img_w + 30), img_h + 30))
             else:
                 self.preview_canvas.delete("all")
-                self.preview_canvas.create_text(250, 150, text="Gagal memuat pratinjau halaman.", fill="#64748B", font=("Segoe UI", 10))
+                self.preview_canvas.create_text(250, 150, text="Gagal memuat pratinjau halaman.", fill="#64748B", font=(UI_FONT, 10))
         except Exception as e:
             self.preview_canvas.delete("all")
-            self.preview_canvas.create_text(250, 150, text=f"Error preview: {e}", fill="#DC2626", font=("Segoe UI", 10))
+            self.preview_canvas.create_text(250, 150, text=f"Error preview: {e}", fill="#DC2626", font=(UI_FONT, 10))
 
     def _prev_page(self) -> None:
         if not self.selected_item:
@@ -763,6 +800,7 @@ class CertSliceApp(tk.Tk):
         self.last_run_dir: Path | None = None
         self.selected_pdf_files: list[Path] = []
         self.input_display_var = tk.StringVar(value="Belum ada file/folder PDF dipilih")
+        configure_global_fonts(self)
 
         self._configure_styles()
         self._build_ui()
@@ -776,7 +814,7 @@ class CertSliceApp(tk.Tk):
         except Exception:
             pass
 
-        font_family = "Segoe UI"
+        font_family = UI_FONT
         self.style.configure(".", font=(font_family, 9), background="#F1F5F9", foreground="#0F172A")
 
         # Tabs: 2 Tabs only
@@ -816,13 +854,13 @@ class CertSliceApp(tk.Tk):
         header = tk.Frame(self, bg="#FFFFFF", relief="solid", bd=1)
         header.pack(fill="x", padx=16, pady=(12, 6), ipady=6)
 
-        title_lbl = tk.Label(header, text="Certificate Manager", font=("Segoe UI", 15, "bold"), fg="#1E40AF", bg="#FFFFFF")
+        title_lbl = tk.Label(header, text="Certificate Manager", font=(UI_FONT, 15, "bold"), fg="#1E40AF", bg="#FFFFFF")
         title_lbl.pack(anchor="w", padx=16, pady=(2, 0))
 
         sub_lbl = tk.Label(
             header,
             text="Sistem Pemrosesan, Penamaan Otomatis & Manajemen Sertifikat Terintegrasi Database Pegawai",
-            font=("Segoe UI", 9),
+            font=(UI_FONT, 9),
             fg="#64748B",
             bg="#FFFFFF",
         )
@@ -855,7 +893,7 @@ class CertSliceApp(tk.Tk):
         card_input.pack(fill="x", pady=(0, 8))
 
         # Row 0: Input PDF / Folder
-        ttk.Label(card_input, text="File / Folder PDF Sertifikat:", font=("Segoe UI", 9, "bold"), background="#FFFFFF").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Label(card_input, text="File / Folder PDF Sertifikat:", font=(UI_FONT, 9, "bold"), background="#FFFFFF").grid(row=0, column=0, sticky="w", pady=4)
         ttk.Entry(card_input, textvariable=self.input_display_var, width=48, state="readonly").grid(row=0, column=1, sticky="ew", padx=8, pady=4)
 
         btn_box = ttk.Frame(card_input, style="Card.TFrame")
@@ -864,7 +902,7 @@ class CertSliceApp(tk.Tk):
         ttk.Button(btn_box, text="📁 Pilih 1 Folder...", style="Secondary.TButton", command=self._browse_dir).pack(side="left")
 
         # Row 1: Database Excel (Pre-filled by default!)
-        ttk.Label(card_input, text="File Database Master (Excel):", font=("Segoe UI", 9, "bold"), background="#FFFFFF").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Label(card_input, text="File Database Master (Excel):", font=(UI_FONT, 9, "bold"), background="#FFFFFF").grid(row=1, column=0, sticky="w", pady=4)
         default_db = get_default_database_path()
         self.db_var = tk.StringVar(value=default_db)
         ttk.Entry(card_input, textvariable=self.db_var, width=48).grid(row=1, column=1, sticky="ew", padx=8, pady=4)
@@ -872,7 +910,7 @@ class CertSliceApp(tk.Tk):
 
         # Row 2: Output folder (Pre-filled by default!)
         default_out = get_default_output_dir()
-        ttk.Label(card_input, text="Folder Penyimpanan Hasil:", font=("Segoe UI", 9, "bold"), background="#FFFFFF").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Label(card_input, text="Folder Penyimpanan Hasil:", font=(UI_FONT, 9, "bold"), background="#FFFFFF").grid(row=2, column=0, sticky="w", pady=4)
         self.out_var = tk.StringVar(value=default_out)
         ttk.Entry(card_input, textvariable=self.out_var, width=48).grid(row=2, column=1, sticky="ew", padx=8, pady=4)
         ttk.Button(card_input, text="Pilih Folder...", style="Secondary.TButton", command=self._browse_out).grid(row=2, column=2, sticky="ew", pady=4)
@@ -889,7 +927,7 @@ class CertSliceApp(tk.Tk):
         ttk.Label(
             row_fmt,
             text="💡 Format Otomatis: SKP ➔ {NID}_{Nama}_{Level}_{Peran}.pdf  |  Sertifikat Standar ➔ {NID}_{Nama}_{Judul}.pdf",
-            font=("Segoe UI", 9, "bold"),
+            font=(UI_FONT, 9, "bold"),
             foreground="#1D4ED8",
             background="#EFF6FF",
             padding=(8, 4),
@@ -900,14 +938,14 @@ class CertSliceApp(tk.Tk):
         row_ai.pack(fill="x", pady=2)
         self.ai_var = tk.BooleanVar(value=bool(self.settings.get("use_ai", True)))
         ttk.Checkbutton(row_ai, text="Aktifkan Mode AI (Gemini Flash-Lite Cerdas & Hemat Kuota)", variable=self.ai_var).pack(side="left")
-        ttk.Label(row_ai, text="— Menyelamatkan nama singkatan, terpotong, atau typo dengan AI", font=("Segoe UI", 8), foreground="#64748B", background="#FFFFFF").pack(side="left", padx=8)
+        ttk.Label(row_ai, text="— Menyelamatkan nama singkatan, terpotong, atau typo dengan AI", font=(UI_FONT, 8), foreground="#64748B", background="#FFFFFF").pack(side="left", padx=8)
 
         # OCR Checkbox
         self.row_ocr = ttk.Frame(card_opts, style="Card.TFrame")
         self.row_ocr.pack(fill="x", pady=(2, 2))
         self.ocr_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(self.row_ocr, text="Gunakan Pembaca Teks Gambar (OCR Otomatis)", variable=self.ocr_var).pack(side="left")
-        ttk.Label(self.row_ocr, text="— Membaca sertifikat scan foto/gambar secara akurat (Disarankan selalu aktif)", font=("Segoe UI", 8), foreground="#64748B", background="#FFFFFF").pack(side="left", padx=8)
+        ttk.Label(self.row_ocr, text="— Membaca sertifikat scan foto/gambar secara akurat (Disarankan selalu aktif)", font=(UI_FONT, 8), foreground="#64748B", background="#FFFFFF").pack(side="left", padx=8)
 
         # Action Buttons Bar
         act_bar = ttk.Frame(top_container)
@@ -951,7 +989,7 @@ class CertSliceApp(tk.Tk):
             state="disabled",
             bg="#0F172A",
             fg="#F8FAFC",
-            font=("Consolas", 9),
+            font=(MONO_FONT, 9),
             relief="flat",
             padx=8,
             pady=8,
@@ -981,7 +1019,7 @@ class CertSliceApp(tk.Tk):
 
         key_row = ttk.Frame(card_api, style="Card.TFrame")
         key_row.pack(fill="x", pady=4)
-        ttk.Label(key_row, text="Google Gemini API Key:", font=("Segoe UI", 9, "bold"), background="#FFFFFF", width=22).pack(side="left")
+        ttk.Label(key_row, text="Google Gemini API Key:", font=(UI_FONT, 9, "bold"), background="#FFFFFF", width=22).pack(side="left")
 
         self.api_key_var = tk.StringVar(value=self.settings.get("gemini_api_key", ""))
         self.key_entry = ttk.Entry(key_row, textvariable=self.api_key_var, show="*", width=42)
@@ -995,7 +1033,7 @@ class CertSliceApp(tk.Tk):
         # Model row
         model_row = ttk.Frame(card_api, style="Card.TFrame")
         model_row.pack(fill="x", pady=6)
-        ttk.Label(model_row, text="Pilihan Model Gemini:", font=("Segoe UI", 9, "bold"), background="#FFFFFF", width=22).pack(side="left")
+        ttk.Label(model_row, text="Pilihan Model Gemini:", font=(UI_FONT, 9, "bold"), background="#FFFFFF", width=22).pack(side="left")
         self.model_var = tk.StringVar(value=self.settings.get("gemini_model", "gemini-flash-lite-latest"))
         cb_model = ttk.Combobox(
             model_row,
@@ -1005,7 +1043,7 @@ class CertSliceApp(tk.Tk):
             width=26,
         )
         cb_model.pack(side="left", padx=6)
-        ttk.Label(model_row, text="★ Rekomendasi: Flash-Lite (Hemat Kuota)", font=("Segoe UI", 8, "bold"), foreground="#047857", background="#FFFFFF").pack(side="left", padx=6)
+        ttk.Label(model_row, text="★ Rekomendasi: Flash-Lite (Hemat Kuota)", font=(UI_FONT, 8, "bold"), foreground="#047857", background="#FFFFFF").pack(side="left", padx=6)
 
         info_quota = (
             "💡 Info Kuota Google AI Studio (Free Tier):\n"
@@ -1013,17 +1051,17 @@ class CertSliceApp(tk.Tk):
             "• Hindari 'gemini-2.5-flash' standar jika di tier gratis karena dibatasi hanya 20 request/hari (RPD), "
             "sehingga cepat muncul peringatan 'You're nearing a rate limit'."
         )
-        ttk.Label(card_api, text=info_quota, justify="left", font=("Segoe UI", 8), foreground="#0369A1", background="#F0F9FF", padding=6).pack(fill="x", pady=(4, 0))
+        ttk.Label(card_api, text=info_quota, justify="left", font=(UI_FONT, 8), foreground="#0369A1", background="#F0F9FF", padding=6).pack(fill="x", pady=(4, 0))
 
         # Default paths configuration
         card_paths = ttk.LabelFrame(container, text=" Jalur Berkas Default ", padding=14, style="Card.TLabelframe")
         card_paths.pack(fill="x", pady=6)
 
-        ttk.Label(card_paths, text="Database Excel Default:", font=("Segoe UI", 9, "bold"), background="#FFFFFF").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Label(card_paths, text="Database Excel Default:", font=(UI_FONT, 9, "bold"), background="#FFFFFF").grid(row=0, column=0, sticky="w", pady=4)
         ttk.Entry(card_paths, textvariable=self.db_var, width=55).grid(row=0, column=1, sticky="ew", padx=8, pady=4)
         ttk.Button(card_paths, text="Pilih...", style="Secondary.TButton", command=self._browse_db).grid(row=0, column=2, pady=4)
 
-        ttk.Label(card_paths, text="Folder Output Default:", font=("Segoe UI", 9, "bold"), background="#FFFFFF").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Label(card_paths, text="Folder Output Default:", font=(UI_FONT, 9, "bold"), background="#FFFFFF").grid(row=1, column=0, sticky="w", pady=4)
         ttk.Entry(card_paths, textvariable=self.out_var, width=55).grid(row=1, column=1, sticky="ew", padx=8, pady=4)
         ttk.Button(card_paths, text="Pilih...", style="Secondary.TButton", command=self._browse_out).grid(row=1, column=2, pady=4)
         card_paths.columnconfigure(1, weight=1)
@@ -1278,5 +1316,10 @@ def main() -> None:
     app.mainloop()
 
 
+def launch_gui() -> None:
+    main()
+
+
 if __name__ == "__main__":
     main()
+
