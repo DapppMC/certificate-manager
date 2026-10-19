@@ -1,0 +1,43 @@
+========================================================================
+           PETUNJUK PENGGUNAAN - CERTIFICATE MANAGER v1.0
+========================================================================
+
+Aplikasi ini bersifat PORTABLE (tidak memerlukan instalasi Python).
+
+------------------------------------------------------------------------
+CARA MENJALANKAN APLIKASI
+------------------------------------------------------------------------
+1. Jalankan "CertificateManager.exe" atau double-click "Buka_Certificate_Manager.bat".
+2. Aplikasi akan langsung terbuka.
+
+------------------------------------------------------------------------
+MENGATASI PERINGATAN KEAMANAN WINDOWS (WINDOWS DEFENDER / SMARTSCREEN)
+------------------------------------------------------------------------
+Karena aplikasi ini dibuat secara mandiri (independen) dan belum didaftarkan 
+sertifikat berbayar Microsoft, Windows mungkin menampilkan peringatan keamanan:
+
+1. JIKA MUNCUL "Windows protected your PC" / "SmartScreen":
+   - Klik tombol "More info" (atau "Informasi selengkapnya").
+   - Klik tombol "Run anyway" (atau "Tetap jalankan").
+   - Peringatan ini hanya muncul sekali saat pertama kali dibuka.
+
+2. JIKA MUNCUL ERROR "An Application Control policy has blocked this file":
+   Ini adalah fitur Smart App Control Windows 11 yang memblokir file DLL unduhan dari internet.
+   Cara mengatasinya:
+   a. Sebelum ekstrak ZIP:
+      Klik kanan file ZIP -> Properties -> Bagian bawah centang "Unblock" (Buka Blokir) -> OK.
+   b. Atau jika sudah terlanjur diekstrak:
+      Jalankan file "Buka_Certificate_Manager.bat" (file ini otomatis membuka blokir file),
+      ATAU buka PowerShell di folder ini lalu ketik:
+      Get-ChildItem -Recurse | Unblock-File
+   c. Jika masih terblokir oleh Smart App Control Windows 11:
+      Buka Windows Security -> App & browser control -> Smart App Control -> ubah ke "Evaluation" atau "Off".
+      Atau tambahkan folder ini ke:
+      Windows Security -> Virus & threat protection -> Manage settings -> Exclusions (Pengecualian Folder).
+
+------------------------------------------------------------------------
+FILE CONTOH & PENGATURAN
+------------------------------------------------------------------------
+- "sample_database.xlsx" disediakan sebagai acuan format database karyawan/peserta.
+- Aplikasi berjalan 100% lokal & offline menggunakan OCR onboard tanpa memerlukan internet atau API key.
+========================================================================
