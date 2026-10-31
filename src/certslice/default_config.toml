@@ -1,0 +1,102 @@
+# Certificate Slicer default configuration (planner-owned, protected: change only through the planner).
+# A user file passed with --config overrides keys table by table (same table names).
+# Matching is case-insensitive and accent-insensitive unless a comment says otherwise.
+
+[database]
+# Sheet: the first sheet whose name matches one of these (case-insensitive), else the first sheet.
+preferred_sheets = ["data master"]
+# The header row is searched in the first `header_search_rows` rows of that sheet.
+header_search_rows = 10
+# Header names are compared after lowercasing and turning spaces, dots and dashes into "_".
+nid = ["nid", "nip", "no_induk", "nomor_induk"]
+nama = ["nama_lengkap", "nama", "nama_pegawai", "nama_karyawan", "name"]
+email = ["email_korporat", "email", "e_mail"]
+unit = ["unit_kerja", "unitket", "unit"]
+jabatan = ["jabatan", "posisi"]
+
+[reader]
+min_text_chars = 20        # fewer characters than this on a page means "no usable text layer"
+ocr_enabled = true
+ocr_dpi = 200
+# A page with a text layer is ALSO read by OCR when its text is shorter than this and an image covers
+# at least this share of the page (certificates whose labels live in a background picture).
+ocr_sparse_below_chars = 400
+ocr_sparse_image_cover = 0.5
+
+[matching]
+accept_score = 92          # best candidate must score at least this
+margin = 5                 # and lead the next different database row by at least this
+list_score = 80            # candidates at or above this are listed in the report
+partial_score = 90         # score given to a shortened name (never accepted: below accept_score)
+template_min_pages = 3     # a name is template/signatory text if it scores >= list_score on
+template_min_share = 0.5   # at least this many pages AND at least this share of the pages
+cue_window_lines = 3       # lines after a holder cue that count as "near the cue"
+min_tokens_fuzzy = 2       # names with fewer tokens must match exactly (score 100)
+holder_cues = ["diberikan kepada", "awarded to", "presented to", "nama", "name", "kepada",
+               "menyatakan bahwa", "certify that"]
+# Academic, professional and religious titles removed before matching (dots are optional).
+titles = ["ir", "dr", "drs", "dra", "prof", "h", "hj", "st", "se", "sh", "skom", "si", "spd",
+          "ssi", "sstp", "sip", "sos", "ssos", "mm", "mt", "msc", "ma", "mba", "mkom", "msi",
+          "mpd", "phd", "amd", "ak", "cpa", "ipm", "ipu", "ip", "bsc", "beng", "meng", "skm",
+          "mkes", "sked", "apt", "spsi", "mpsi", "sag", "mag", "stp", "mtp"]
+
+[grouping]
+max_pages_per_cert = 3
+# Regular expressions (case-insensitive) that mark a continuation page.
+continuation_patterns = ['\b2\s*/\s*2\b', '\bhalaman\s*2\b', '\bpage\s*2\s*(of|/)\s*2\b', '\blampiran\b',
+                         '\bdaftar unit\b', '\btranskrip\b', '\bappendix\b']
+
+[fields]
+template_line_share = 0.6  # a line on at least this share of pages (bundle >= 3 pages) is template text
+title_cues = ["has successfully completed training of", "has completed training of", "telah kompeten pada",
+              "is competent for", "telah mengikuti pelatihan", "telah dinyatakan kompeten pada skema", "pada skema", "skema",
+              "jabatan kerja", "pada bidang", "dalam bidang", "telah mengikuti", "has completed",
+              "has attended", "in the field of", "kualifikasi"]
+title_generic = ["sertifikat", "certificate", "sertifikat kompetensi", "certificate of competency",
+                 "sertifikat pelatihan", "certificate of completion", "piagam", "pelatihan", "training",
+                 "sertifikasi", "lampiran sertifikat"]
+title_keywords = ["sertifikat", "certificate", "pelatihan", "training", "lisensi", "license"]
+issuer_keywords = ["lembaga sertifikasi", "direktorat jenderal", "badan nasional sertifikasi",
+                   "corporate university", "pln corpu", "udiklat", "kementerian", "universitas", "pt "]
+issuer_exclude = ["pln nusantara power services", "pln nps"]   # the employer printed on certificates
+issuer_join_next = ["lembaga sertifikasi profesi", "lembaga sertifikasi"]   # name continues on the next line
+training_words = ["pelatihan", "training", "diklat", "workshop", "kursus", "course"]
+certification_words = ["sertifikasi", "kompetensi", "competency", "certification", "lisensi", "license",
+                       "sertifikat"]
+number_keywords = ["nomor", "no", "number", "nr", "registrasi", "reg"]
+issue_markers = ["ditetapkan", "diterbitkan", "tanggal terbit", "issued", "date of issue", "dikeluarkan"]
+expiry_markers = ["berlaku s.d", "berlaku s/d", "berlaku sampai", "berlaku hingga", "masa berlaku",
+                  "valid until", "valid thru", "valid through", "expired", "expiry", "kedaluwarsa",
+                  "kadaluarsa"]
+range_words = ["s.d.", "s.d", "s/d", "sampai dengan", "sampai", "hingga", "until", "to"]
+ignore_date_markers = ["tanggal lahir", "lahir", "date of birth", "born"]
+renewal_pattern = 'perpanjangan(?:\s+ke)?[\s\-]*(\d+)'
+# "berlaku untuk 3 (tiga) Tahun" / "valid for 3 (three) years": expiry = issue date + N years
+duration_pattern = 'berlaku\s+(?:untuk|selama)\s+(\d+)\s*(?:\([a-z ]+\)\s*)?tahun|valid\s+for\s+(\d+)\s*(?:\([a-z ]+\)\s*)?years?'
+
+# Printed expiry dates always win. Otherwise the first rule whose phrase occurs in the certificate text
+# decides. years = 0 means "does not expire" (expiry cell left empty, not flagged).
+[[validity_rules]]
+match = ["direktorat jenderal ketenagalistrikan", "djk"]
+years = 5
+
+[[validity_rules]]
+match = ["bnsp", "k3", "keselamatan dan kesehatan kerja"]
+years = 3
+
+[[validity_rules]]
+match = ["corporate university", "pln corpu", "udiklat", "pelatihan internal"]
+years = 0
+
+[naming]
+pattern = "{nid}_{nama}_{judul}_{tahun}"
+renewal_suffix = "_PERPANJANGAN_{ke}"
+duplicate_suffix = "_dup{n}"
+max_path_chars = 250
+min_title_chars = 10
+unknown_year = "0000"
+unknown_title = "Tanpa Judul"
+alias_file = ""            # CSV with columns raw_title,short_title; relative to the config file
+
+[output]
+date_format = "%d/%m/%Y"   # dates in the manifest and report

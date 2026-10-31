@@ -1,0 +1,2 @@
+page,nid,title,number,issue_date,expiry_date
+1,<NID of the holder of the certificate that starts on page 1>,<title as printed>,<certificate number>,<DD/MM/YYYY>,<DD/MM/YYYY or empty>

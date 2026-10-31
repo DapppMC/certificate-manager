@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+out/
+certslice_settings.json
+*.zip
+*.exe
+*.xlsx
+!templates/sample_database.xlsx

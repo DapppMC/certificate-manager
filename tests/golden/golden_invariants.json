@@ -1,0 +1,118 @@
+{
+  "schema": "golden-master/1",
+  "headers": {
+    "manifest": [
+      "No",
+      "NID",
+      "Nama Pegawai",
+      "Judul Sertifikasi/Pelatihan",
+      "Jenis Dokumen (Sertifikasi/Pelatihan)",
+      "Lembaga/Penyelenggara",
+      "Nomor Sertifikat",
+      "Tanggal Terbit",
+      "Tanggal Expired",
+      "Nama File PDF"
+    ],
+    "unmatched": [
+      "Halaman",
+      "Alasan",
+      "Kandidat 1 Nama",
+      "Kandidat 1 NID",
+      "Kandidat 1 Unit",
+      "Kandidat 1 Skor",
+      "Kandidat 2 Nama",
+      "Kandidat 2 NID",
+      "Kandidat 2 Unit",
+      "Kandidat 2 Skor",
+      "Kandidat 3 Nama",
+      "Kandidat 3 NID",
+      "Kandidat 3 Unit",
+      "Kandidat 3 Skor",
+      "Judul",
+      "Nomor Sertifikat",
+      "Tanggal Terbit",
+      "Tanggal Expired",
+      "Sumber Teks"
+    ],
+    "needs_review": [
+      "Nama File PDF",
+      "NID",
+      "Halaman",
+      "Kolom",
+      "Nilai",
+      "Keyakinan"
+    ],
+    "mso_nps": [
+      "NID",
+      "RESOURCE CLASS",
+      "RESOURCE CODE",
+      "COMPETENCY LEVEL",
+      "EFFECTIVE DATE",
+      "GAINED DATE",
+      "EXP DATE",
+      "REQ TYPE",
+      "INSTITUTE CODE",
+      "PRIMARY"
+    ]
+  },
+  "normalize": {
+    "ir_budi": "budi santoso",
+    "tokens": [
+      "siti",
+      "aminah"
+    ]
+  },
+  "matcher": {
+    "decision_status": "accepted",
+    "decision_nid": "007123",
+    "decision_score": 100.0,
+    "decision_reason": ""
+  },
+  "fields_and_expiry": {
+    "number": "1234.01.SKP.02.2025",
+    "issue_date": "2025-01-15",
+    "expiry_date": "2028-01-15",
+    "expiry_source": "duration:3y",
+    "title": "bidang: Pemeliharaan Generator PLTD",
+    "doc_type": "Sertifikasi"
+  },
+  "levels_and_peran": {
+    "level_1": "PELAKSANA MUDA",
+    "level_5": "ANALIS MADYA",
+    "level_8": "AHLI MADYA",
+    "numeric_7": 7.0,
+    "clean_peran": "Mengoperasian unit PLTD besar"
+  },
+  "mso_rules": {
+    "organic_true": true,
+    "organic_false_3letter": false,
+    "valid_mso_true": true,
+    "valid_mso_false": false,
+    "date_int": 20260522,
+    "exp_int": 20290522
+  },
+  "preformatted_parser": {
+    "skp": {
+      "nid": "9016033PL",
+      "nama": "Budi Santoso",
+      "is_skp": true,
+      "level": "PELAKSANA MADYA",
+      "peran": "Mengoperasian unit PLTD besar",
+      "judul": "Mengoperasian unit PLTD besar",
+      "tahun": "-",
+      "resource_code": "A500",
+      "institute_code": "D002"
+    },
+    "non_skp": {
+      "nid": "9016033PL",
+      "nama": "Budi Santoso",
+      "is_skp": true,
+      "level": "Ahli K3 Umum",
+      "peran": "2025",
+      "judul": "2025",
+      "tahun": "2025",
+      "resource_code": "",
+      "institute_code": "D002"
+    }
+  }
+}

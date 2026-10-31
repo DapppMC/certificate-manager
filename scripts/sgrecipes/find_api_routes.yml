@@ -1,0 +1,13 @@
+# Gate -2 entrypoint discovery: Express-style HTTP routes (JS/TS).
+# Run: ast-grep scan -r tools/sgrecipes/find_api_routes.yml <dir>
+id: find-api-routes
+language: TypeScript
+severity: hint
+message: "HTTP route $METHOD $PATH"
+rule:
+  any:
+    - pattern: app.$METHOD($PATH, $$$HANDLERS)
+    - pattern: router.$METHOD($PATH, $$$HANDLERS)
+constraints:
+  METHOD:
+    regex: "^(get|post|put|delete|patch)$"
