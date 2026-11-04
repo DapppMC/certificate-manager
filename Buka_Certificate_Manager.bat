@@ -1,20 +1,25 @@
 @echo off
-title Certificate Manager
+title Certificate Manager v3.1 - Desktop GUI Native
 cd /d "%~dp0"
-echo Membuka Certificate Manager...
+echo ==============================================================
+echo  Membuka Certificate Manager v3.1 (Desktop GUI Native)
+echo ==============================================================
 
-:: Otomatis unblock seluruh file di folder ini jika diunduh dari internet
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -Path '%~dp0' -Recurse | Unblock-File" 2>nul
 
-if exist "%~dp0CertificateManager.exe" (
-    start "" "%~dp0CertificateManager.exe"
-) else if exist "%~dp0dist\CertificateManager\CertificateManager.exe" (
+set PYTHONPATH=%~dp0src;%PYTHONPATH%
+
+if exist "%~dp0dist\CertificateManager\CertificateManager.exe" (
     start "" "%~dp0dist\CertificateManager\CertificateManager.exe"
-) else if exist "%~dp0dist\CertificateSlicer\CertificateSlicer.exe" (
-    start "" "%~dp0dist\CertificateSlicer\CertificateSlicer.exe"
+) else if exist "%~dp0CertificateManager.exe" (
+    start "" "%~dp0CertificateManager.exe"
 ) else if exist "%~dp0.venv\Scripts\pythonw.exe" (
-    start "" "%~dp0.venv\Scripts\pythonw.exe" -m certslice
+    start "" "%~dp0.venv\Scripts\pythonw.exe" -m certslice gui
+) else if exist "%LOCALAPPDATA%\Programs\Python\Python314\pythonw.exe" (
+    start "" "%LOCALAPPDATA%\Programs\Python\Python314\pythonw.exe" -m certslice gui
+) else if exist "C:\Python313\pythonw.exe" (
+    start "" "C:\Python313\pythonw.exe" -m certslice gui
 ) else (
-    start "" pythonw -m certslice
+    start "" pythonw -m certslice gui
 )
 exit

@@ -1,13 +1,13 @@
 [Desktop Entry]
 Version=1.0
-Name=Certificate Manager (Desktop GUI)
+Name=Certificate Manager v3.1 (Desktop GUI)
 GenericName=Manajer Sertifikat Desktop GUI
-Comment=Aplikasi desktop Tkinter untuk pemrosesan, penamaan & rekapitulasi sertifikat PDF
-Exec=/home/dapp/Projects/cert_slicer/buka_certificate_manager.sh
+Comment=Aplikasi desktop native Tkinter v3.1 untuk pemrosesan, penamaan & rekapitulasi sertifikat PDF
+Exec=/mnt/windows/dev/cert-slicer/buka_certificate_manager.sh
 Icon=/home/dapp/.local/share/icons/certificate-manager.png
 Terminal=false
 Type=Application
 Categories=Office;Utility;Development;
-Keywords=Certificate;Tkinter;GUI;Sertifikat;Slicer;
+Keywords=Certificate;Tkinter;GUI;Sertifikat;Slicer;PLN;NPS;
 StartupWMClass=certslice
 StartupNotify=true

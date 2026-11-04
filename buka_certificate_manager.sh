@@ -6,9 +6,11 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+mkdir -p "$SCRIPT_DIR/out"
+export PYTHONPATH="$SCRIPT_DIR/src:${PYTHONPATH}"
 
 echo "======================================================="
-echo "🌟 Membuka Certificate Manager (Desktop GUI)..."
+echo "🌟 Membuka Certificate Manager v3.1 (Desktop GUI)..."
 echo "======================================================="
 
 # Pastikan environment Python Linux tersedia

@@ -7,9 +7,11 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+mkdir -p "$SCRIPT_DIR/out"
+export PYTHONPATH="$SCRIPT_DIR/src:${PYTHONPATH}"
 
 echo "======================================================="
-echo "🌟 Membuka Certificate Manager - Precision Studio v3.0..."
+echo "🌟 Membuka Certificate Manager - Precision Studio v3.1..."
 echo "======================================================="
 
 # Pastikan environment Python Linux tersedia

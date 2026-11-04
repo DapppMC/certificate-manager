@@ -5,6 +5,8 @@
 # ==============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+mkdir -p "$SCRIPT_DIR/out"
+export PYTHONPATH="$SCRIPT_DIR/src:${PYTHONPATH}"
 
 PORT=8500
 URL="http://127.0.0.1:$PORT"
