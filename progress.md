@@ -1,9 +1,9 @@
 # Project Progress & Continuity Log
 
 - **Project:** Certificate Manager v3.1 (Precision Studio Web & Desktop Edition — `cert-slicer`)
-- **Last Updated:** 2026-11-04 10:31:00
+- **Last Updated:** 2026-11-04 10:59:00
 - **Current Status:** COMPLETED
-- **Current Objective:** Wave 4 (Fase 5 Otomasi Magang TDC + Koreksi.md Compatibility) — FTP Duplicate Guard, Auto-Extract `.ZIP` & Merge Companion PDF (SK + Sertifikat), Per-Participant Excel (`Excel_Per_Peserta/*.xlsx`), and Direct Sync to Website Monitoring (`Program_1`).
+- **Current Objective:** Wave 4 (Fase 5 Otomasi Magang TDC + Koreksi.md Compatibility) — FTP Duplicate Guard, Auto-Extract `.ZIP` & Merge Companion PDF (SK + Sertifikat), Per-Participant Excel (`Excel_Per_Peserta/*.xlsx`), Direct Sync to Website Monitoring (`Program_1`), and Desktop / Application Launcher Shortcuts on Linux and Windows.
 
 ## 1. Completed Work & Changes Made
 - [x] `src/certslice/bulk.py`:
@@ -15,8 +15,15 @@
   - Updated `/api/process` and `WEB_HTML_CONTENT` dropzone to accept `.pdf` and `.zip` archives.
   - Updated `/api/jobs/{job_id}/download/zip` to package both combined Excel workbooks (`data.xlsx`, `manifest_slice.xlsx`, `For NPS 0726.xlsx`) and individual participant Excel workbooks (`Excel_Per_Peserta/*.xlsx`).
   - Added `POST /api/jobs/{job_id}/merge-companion` and `POST /api/jobs/{job_id}/sync-monitoring` (direct sync bridge to Website Monitoring `Program_1`), plus UI buttons `"Gabung SK + Sertifikat"`, `"Kirim ke Website Monitoring"`, and `"Sudah Ada di FTP"` badge.
+- [x] Application Launcher & Desktop Shortcuts (Linux & Windows):
+  - Linux Application Launcher (`~/.local/share/applications/` & `~/Desktop/`):
+    - `Certificate Manager v3.1 (Web Studio)` -> executes `/mnt/windows/dev/cert-slicer/launch_app.sh`
+    - `Certificate Manager v3.1 (Desktop GUI)` -> executes `/mnt/windows/dev/cert-slicer/buka_certificate_manager.sh`
+  - Windows Desktop (`C:\Users\lenovo\Desktop\` / `/mnt/windows/Users/lenovo/Desktop/`):
+    - `Certificate_Manager_Web_Studio_v3.1.bat` -> executes `C:\dev\cert-slicer\Buka_Web_Studio_v3.bat` (Port 8500)
+    - `Certificate_Manager_Desktop_GUI_v3.1.bat` -> executes `C:\dev\cert-slicer\Buka_Certificate_Manager.bat`
 - [x] `tests/test_wave4_fase5.py`:
-  - Added comprehensive Wave 4 test suite; full test suite passed: **213 passed in 15.16s** (100% PASS, including Golden Invariants and Design Lint checks).
+  - Added comprehensive Wave 4 test suite; full test suite passed: **213 passed in 12.86s** (100% PASS, including Golden Invariants and Design Lint checks).
 
 ## 2. System State & Invariants
 - **Golden Invariants:** 100% intact (`213 passed`).
