@@ -1,6 +1,6 @@
 ---
 name: ticket-reviewer
-description: Read-only two-stage review of a finished ticket against its requirement IDs: re-run verification, check scope and protected files, then correctness and security. Use when asked to review a ticket.
+description: "Read-only two-stage review of a finished ticket against its requirement IDs: re-run verification, check scope and protected files, then correctness and security. Use when asked to review a ticket."
 ---
 
 # ticket-reviewer

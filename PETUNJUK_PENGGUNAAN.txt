@@ -1,14 +1,27 @@
 ========================================================================
-           PETUNJUK PENGGUNAAN - CERTIFICATE MANAGER v1.0
+      PETUNJUK PENGGUNAAN - CERTIFICATE MANAGER v3.0 (ENTERPRISE)
 ========================================================================
 
 Aplikasi ini bersifat PORTABLE (tidak memerlukan instalasi Python).
+Telah dilengkapi dengan 3 Berkas Master Excel Referensi resmi PLN Nusantara Power Services
+serta konfigurasi Google Gemini API Key bawaan (certslice_settings.json).
 
 ------------------------------------------------------------------------
-CARA MENJALANKAN APLIKASI
+CARA MENJALANKAN APLIKASI (2 PILIHAN ANTARMUKA)
 ------------------------------------------------------------------------
-1. Jalankan "CertificateManager.exe" atau double-click "Buka_Certificate_Manager.bat".
-2. Aplikasi akan langsung terbuka.
+1. Ekstrak file ZIP ini ke folder mana pun di laptop/komputer Anda.
+2. Pilih salah satu cara menjalankan:
+   a) MODE DESKTOP KLASIK:
+      Jalankan "CertificateManager.exe" atau double-click "Buka_Certificate_Manager.bat".
+   b) MODE WEB STUDIO MODERN v3.0 (Browser Lokal Offline):
+      Double-click "Buka_Web_Studio_v3.bat", ATAU klik tombol "🌐 Buka Web Studio (:8500)"
+      di pojok kanan atas jendela aplikasi Desktop.
+3. Aplikasi akan langsung mendeteksi ketiga berkas Excel referensi secara otomatis:
+   - Data Master SDM April (Ellipse 30 04 2026).xlsx
+   - Komparasi Kode Baru Sertifikasi NPS 0726.xlsx
+   - MSO765_NPS.xlsx
+4. Anda tinggal memilih file PDF / folder sertifikat yang ingin diproses, lalu klik tombol "Mulai Proses Otomatis"!
+
 
 ------------------------------------------------------------------------
 MENGATASI PERINGATAN KEAMANAN WINDOWS (WINDOWS DEFENDER / SMARTSCREEN)
@@ -36,8 +49,10 @@ sertifikat berbayar Microsoft, Windows mungkin menampilkan peringatan keamanan:
       Windows Security -> Virus & threat protection -> Manage settings -> Exclusions (Pengecualian Folder).
 
 ------------------------------------------------------------------------
-FILE CONTOH & PENGATURAN
+BERKAS RUJUKAN EXCEL YANG SUDAH TERSEDIA
 ------------------------------------------------------------------------
-- "sample_database.xlsx" disediakan sebagai acuan format database karyawan/peserta.
-- Aplikasi berjalan 100% lokal & offline menggunakan OCR onboard tanpa memerlukan internet atau API key.
+1. "Data Master SDM April (Ellipse 30 04 2026).xlsx": Database rujukan identitas pegawai.
+2. "Komparasi Kode Baru Sertifikasi NPS 0726.xlsx": Katalog resmi pemetaan Resource Code & level sertifikasi 1-9.
+3. "MSO765_NPS.xlsx": Template acuan pembuatan berkas "For NPS 0726.xlsx".
+4. "sample_database.xlsx": Template pengujian cadangan.
 ========================================================================

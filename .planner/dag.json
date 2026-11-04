@@ -1,0 +1,60 @@
+{
+  "waves": [
+    [
+      "CS-401-CORE-SPEED-ENGINE"
+    ],
+    [
+      "CS-402-BULK-PIPELINE-ENHANCEMENT"
+    ],
+    [
+      "CS-403-WEB-STUDIO-V3-OVERHAUL"
+    ],
+    [
+      "CS-404-GUI-AND-VERIFICATION-SUITE"
+    ]
+  ],
+  "edges": [
+    {
+      "from": "CS-401-CORE-SPEED-ENGINE",
+      "to": "CS-402-BULK-PIPELINE-ENHANCEMENT",
+      "kind": "depends_on"
+    },
+    {
+      "from": "CS-402-BULK-PIPELINE-ENHANCEMENT",
+      "to": "CS-403-WEB-STUDIO-V3-OVERHAUL",
+      "kind": "depends_on"
+    },
+    {
+      "from": "CS-403-WEB-STUDIO-V3-OVERHAUL",
+      "to": "CS-404-GUI-AND-VERIFICATION-SUITE",
+      "kind": "depends_on"
+    }
+  ],
+  "critical_path": [
+    "CS-401-CORE-SPEED-ENGINE",
+    "CS-402-BULK-PIPELINE-ENHANCEMENT",
+    "CS-403-WEB-STUDIO-V3-OVERHAUL",
+    "CS-404-GUI-AND-VERIFICATION-SUITE"
+  ],
+  "predecessors": {
+    "CS-401-CORE-SPEED-ENGINE": [],
+    "CS-402-BULK-PIPELINE-ENHANCEMENT": [
+      "CS-401-CORE-SPEED-ENGINE"
+    ],
+    "CS-403-WEB-STUDIO-V3-OVERHAUL": [
+      "CS-402-BULK-PIPELINE-ENHANCEMENT"
+    ],
+    "CS-404-GUI-AND-VERIFICATION-SUITE": [
+      "CS-403-WEB-STUDIO-V3-OVERHAUL"
+    ]
+  },
+  "ticket_sha": {
+    "CS-401-CORE-SPEED-ENGINE": "b474d98bba2644a862d46d21ba460f8d5fe2f0099e077bbb689605b465315d31",
+    "CS-402-BULK-PIPELINE-ENHANCEMENT": "50b989162d07573797a7d3c197b5fe020bf3d9ca005b8934a5b3e7777f15c544",
+    "CS-403-WEB-STUDIO-V3-OVERHAUL": "f95a6264c5908b675760c032aec94ebfb1b11d7ff2dfbb82ec044d8264f37e65",
+    "CS-404-GUI-AND-VERIFICATION-SUITE": "3b64c004eddfecbbd338f5005e9a6db6e084097cb2f66d7db9bf242a76ca41dd"
+  },
+  "epoch": 1,
+  "project": "",
+  "signature_kind": "sha256"
+}

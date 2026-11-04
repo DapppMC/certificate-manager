@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import re
 
 from certslice.normalize import fold
@@ -151,9 +152,13 @@ def extract_number(lines: list[str], cfg: dict) -> str | None:
     return None
 
 
+@functools.lru_cache(maxsize=256)
+def _compiled_phrase_regex(phrase: str) -> re.Pattern:
+    return re.compile(r"(?<![a-z0-9])" + re.escape(fold(phrase)) + r"(?![a-z0-9])")
+
+
 def _phrase_match(phrase: str, text: str) -> bool:
-    pattern = r"(?<![a-z0-9])" + re.escape(fold(phrase)) + r"(?![a-z0-9])"
-    return bool(re.search(pattern, text))
+    return bool(_compiled_phrase_regex(phrase).search(text))
 
 
 def extract_dates(lines: list[str], cfg: dict) -> tuple[dt.date | None, str, dt.date | None, str]:
@@ -395,4 +400,87 @@ def renewal_number(group_lines: list[str], cfg: dict) -> int | None:
     if m:
         return int(m.group(1))
     return None
+
+
+def smart_extract_dates(text: str, is_k3: bool = False) -> tuple[dt.date | None, dt.date | None]:
+    """Smart date extractor for Indonesian certificates (SKP, Kemnaker, BNSP, Training).
+    
+    Returns (issue_date, expiry_date) as (dt.date, dt.date).
+    """
+    if not text or not text.strip():
+        return None, None
+
+    iss_date: dt.date | None = None
+    exp_date: dt.date | None = None
+
+    # Filter out birth date lines & ministry accreditation lines from issue search
+    filtered_lines = []
+    ignored_keywords = [
+        "tanggal lahir", "tgl lahir", "tempat/tgl", "tempat dan tanggal lahir",
+        "place and date of birth", "date of birth", "birth",
+        "akreditasi menteri", "nomor akreditasi", "accreditation number",
+        "minister of energy", "kementerian", "nomor sertifikat",
+        "certificate number", "nomor registrasi", "registration number",
+    ]
+    for line in text.splitlines():
+        l_low = line.lower()
+        if any(ign in l_low for ign in ignored_keywords):
+            continue
+        filtered_lines.append(line)
+    clean_text = "\n".join(filtered_lines)
+
+    # 1. Enactment / issuance patterns
+    iss_patterns = [
+        r"(?:Ditetapkan|Diterbitkan|Dikeluarkan)\s+di[^\n]*\n?\s*(?:Pada\s+tanggal|Tanggal|At\s+the\s+date\s+of)[^\n\d]*(\d{1,2}\s+[A-Za-z]+\s+\d{4})",
+        r"(?:Pada\s+tanggal|At\s+the\s+date\s+of)[^\n\d]*(\d{1,2}\s+[A-Za-z]+\s+\d{4})",
+        r"(?:Tanggal\s+(?:terbit|dikeluarkan|penetapan)|Date\s+of\s+issuance)[^\n\d]*(\d{1,2}\s+[A-Za-z]+\s+\d{4})",
+        r"\b(?:Jakarta|Surabaya|Bandung|Semarang|Medan|Makassar|Luwuk|Palembang|Balikpapan|Denpasar|Batam)[,\s]+(\d{1,2}\s+[A-Za-z]+\s+\d{4})",
+    ]
+    for pat in iss_patterns:
+        m = re.search(pat, clean_text, re.IGNORECASE)
+        if m:
+            fd = find_dates(m.group(0))
+            if fd:
+                iss_date = fd[0][1]
+                break
+
+    # Fallback to general find_dates in clean_text (closest to current date, within 2 years in future)
+    if not iss_date:
+        all_d = find_dates(clean_text)
+        if all_d:
+            today = dt.date.today()
+            # Valid candidates: up to 1 year ahead of current date, but after 2010
+            candidates = [d for _, d in all_d if 2010 <= d.year <= today.year + 1]
+            if candidates:
+                candidates.sort(key=lambda d: abs((d - today).days))
+                iss_date = candidates[0]
+
+    # 2. Validity / Expiry
+    validity_years = 5 if is_k3 else 3
+    m_val = re.search(
+        r"(?:berlaku|masa\s+berlaku|validity|valid\s+for)\s+(?:selama\s+)?(?:untuk\s+)?(?:jangka\s+waktu\s+)?([1-9])\s*(?:\([a-z]+\)\s*)?(?:tahun|years?)",
+        text,
+        re.IGNORECASE,
+    )
+    if m_val:
+        validity_years = int(m_val.group(1))
+
+    # Explicit expiry date pattern (e.g. 'berlaku sampai 19 Agustus 2029')
+    m_exp = re.search(
+        r"(?:berlaku\s+(?:sampai|hingga)|valid\s+until|expired?\s+date)[^\n\d]*(\d{1,2}\s+[A-Za-z]+\s+\d{4})",
+        text,
+        re.IGNORECASE,
+    )
+    if m_exp:
+        fd_exp = find_dates(m_exp.group(0))
+        if fd_exp:
+            exp_date = fd_exp[0][1]
+
+    if iss_date and not exp_date:
+        try:
+            exp_date = iss_date.replace(year=iss_date.year + validity_years)
+        except ValueError:
+            exp_date = iss_date.replace(year=iss_date.year + validity_years, day=28)
+
+    return iss_date, exp_date
 

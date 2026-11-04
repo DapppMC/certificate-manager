@@ -10,27 +10,34 @@ import pymupdf
 
 from certslice.bulk import update_bulk_workbooks_from_groups
 from certslice.config import load_config
+from certslice.levels import clean_skp_peran, resolve_skp_level
 from certslice.naming import NameBuilder, clean_field
 from certslice.writer import write_workbooks
 
 
 def get_review_items(run_dir: Path) -> list[dict[str, Any]]:
-    """Load groups that need review or are unmatched from plan.json in run_dir."""
-    plan_path = run_dir / "plan.json"
-    if not plan_path.exists():
-        return []
-
-    try:
-        data = json.loads(plan_path.read_text(encoding="utf-8"))
-    except Exception:
-        return []
-
-    groups = data.get("groups", [])
+    """Load groups that need review or are unmatched from plan.json in run_dir or its subdirectories."""
+    run_dir = Path(run_dir)
     review_items = []
-    for g in groups:
-        # Include unmatched groups or groups marked needing review
-        if g.get("status") == "unmatched":
-            review_items.append(g)
+
+    plan_files = []
+    if (run_dir / "plan.json").exists():
+        plan_files.append(run_dir / "plan.json")
+    for p in sorted(run_dir.rglob("plan.json")):
+        if p not in plan_files:
+            plan_files.append(p)
+
+    for plan_path in plan_files:
+        try:
+            data = json.loads(plan_path.read_text(encoding="utf-8"))
+            for g in data.get("groups", []):
+                # Include unmatched groups or groups marked needing review
+                if g.get("status") in ["unmatched", "review"] or g.get("status") != "accepted":
+                    g["_plan_dir"] = str(plan_path.parent)
+                    g["_plan_path"] = str(plan_path)
+                    review_items.append(g)
+        except Exception:
+            continue
 
     return review_items
 
@@ -84,9 +91,37 @@ def approve_group(
     unit: str = "",
     custom_title: str | None = None,
     custom_year: str | None = None,
+    plan_path: Path | str | None = None,
 ) -> str:
     """Approve an unmatched group, slice the PDF, save it, and update manifests."""
-    plan_path = run_dir / "plan.json"
+    run_dir = Path(run_dir)
+    if plan_path:
+        plan_path = Path(plan_path)
+        run_dir = plan_path.parent
+    else:
+        plan_path = run_dir / "plan.json"
+        if not plan_path.exists():
+            for p in sorted(run_dir.rglob("plan.json")):
+                try:
+                    d = json.loads(p.read_text(encoding="utf-8"))
+                    if any(g.get("id") == group_id and g.get("status") != "accepted" for g in d.get("groups", [])):
+                        plan_path = p
+                        run_dir = p.parent
+                        break
+                except Exception:
+                    continue
+
+            if not plan_path.exists():
+                for p in sorted(run_dir.rglob("plan.json")):
+                    try:
+                        d = json.loads(p.read_text(encoding="utf-8"))
+                        if any(g.get("id") == group_id for g in d.get("groups", [])):
+                            plan_path = p
+                            run_dir = p.parent
+                            break
+                    except Exception:
+                        continue
+
     if not plan_path.exists():
         raise FileNotFoundError(f"plan.json not found in {run_dir}")
 
@@ -120,8 +155,10 @@ def approve_group(
         clean_nama = clean_field(nama) or "Tanpa Nama"
         clean_judul = clean_field(judul) or "Tanpa Judul"
         if is_skp and (level or peran):
-            clean_level = clean_field(level)
-            clean_peran = clean_field(peran or judul)
+            resolved_level = resolve_skp_level(level)
+            resolved_peran = clean_skp_peran(peran or judul)
+            clean_level = clean_field(resolved_level)
+            clean_peran = clean_field(resolved_peran)
             parts = [p for p in [clean_nid, clean_nama, clean_level, clean_peran] if p]
             base_name = "_".join(parts) or clean_nama
         else:
@@ -161,31 +198,64 @@ def approve_group(
             renewal=target_grp.get("renewal"),
         )
 
-    # Slice / Copy PDF if source PDF exists
+    # Slice / Copy PDF if source PDF exists, or rename existing [REVIEW]_ file
     input_pdf_path = Path(target_grp.get("src_pdf") or plan_data.get("input_pdf", ""))
+    pdf_dir = run_dir / "pdf"
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+    target_out_path = pdf_dir / file_name
+
+    saved_from_src = False
     if input_pdf_path.exists():
-        pdf_dir = run_dir / "pdf"
-        pdf_dir.mkdir(parents=True, exist_ok=True)
         is_bundle_item = target_grp.get("is_bundle", not is_bulk)
         if is_bundle_item:
-            doc = pymupdf.open(input_pdf_path)
-            first_idx = target_grp["pages"][0] - 1
-            last_idx = target_grp["pages"][-1] - 1
-            new_doc = pymupdf.open()
-            new_doc.insert_pdf(doc, from_page=first_idx, to_page=last_idx)
-            new_doc.save(pdf_dir / file_name)
-            new_doc.close()
-            doc.close()
-        else:
-            shutil.copy2(input_pdf_path, pdf_dir / file_name)
-
-        # Remove old [REVIEW]_ temp file if present
-        old_rev = target_grp.get("review_file_name")
-        if old_rev and (pdf_dir / old_rev).exists():
             try:
-                (pdf_dir / old_rev).unlink()
+                doc = pymupdf.open(input_pdf_path)
+                first_idx = target_grp["pages"][0] - 1
+                last_idx = target_grp["pages"][-1] - 1
+                new_doc = pymupdf.open()
+                new_doc.insert_pdf(doc, from_page=first_idx, to_page=last_idx)
+                new_doc.save(target_out_path)
+                new_doc.close()
+                doc.close()
+                saved_from_src = True
             except Exception:
                 pass
+        else:
+            try:
+                shutil.copy2(input_pdf_path, target_out_path)
+                saved_from_src = True
+            except Exception:
+                pass
+
+    # Clean up old review files and ensure target_out_path exists
+    old_names = set()
+    if target_grp.get("review_file_name"):
+        old_names.add(target_grp["review_file_name"])
+    if target_grp.get("file_name"):
+        old_names.add(target_grp["file_name"])
+
+    for old_n in old_names:
+        if old_n and old_n != file_name:
+            old_p = pdf_dir / old_n
+            if old_p.exists():
+                if not saved_from_src and not target_out_path.exists():
+                    try:
+                        shutil.copy2(old_p, target_out_path)
+                        saved_from_src = True
+                    except Exception:
+                        pass
+                try:
+                    old_p.unlink()
+                except Exception:
+                    pass
+
+    # Extra safety: remove any [REVIEW]_ file matching the clean name
+    stray_rev = pdf_dir / f"[REVIEW]_{file_name}"
+    if stray_rev.exists() and stray_rev != target_out_path:
+        try:
+            stray_rev.unlink()
+        except Exception:
+            pass
 
     # Update group record in plan
     target_grp["status"] = "accepted"
@@ -195,12 +265,20 @@ def approve_group(
     target_grp["email"] = email
     target_grp["unit"] = unit
     target_grp["file_name"] = file_name
+    target_grp["review_file_name"] = None
     if "fields" not in target_grp:
         target_grp["fields"] = {}
     if "title" not in target_grp["fields"]:
         target_grp["fields"]["title"] = {}
     target_grp["fields"]["title"]["value"] = judul
     target_grp["fields"]["title"]["confidence"] = "high"
+    if is_skp:
+        if "level" not in target_grp["fields"]:
+            target_grp["fields"]["level"] = {}
+        target_grp["fields"]["level"]["value"] = resolve_skp_level(level)
+        if "peran" not in target_grp["fields"]:
+            target_grp["fields"]["peran"] = {}
+        target_grp["fields"]["peran"]["value"] = clean_skp_peran(peran or judul)
 
     # Save updated plan.json
     plan_path.write_text(json.dumps(plan_data, ensure_ascii=False, indent=2), encoding="utf-8")

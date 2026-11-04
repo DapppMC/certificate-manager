@@ -1,9 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('C:/dev/cert-slicer/src/certslice/default_config.toml', 'certslice')]
+datas = [('C:\\dev\\cert-slicer\\src\\certslice\\default_config.toml', 'certslice'), ('C:\\dev\\cert-slicer\\templates\\sample_database.xlsx', 'templates')]
 binaries = []
-hiddenimports = []
+hiddenimports = ['certslice.levels', 'certslice.resource_codes', 'certslice.mso', 'certslice.bulk', 'certslice.reviewer', 'certslice.gui', 'certslice.web']
 tmp_ret = collect_all('rapidocr')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('pymupdf')
@@ -11,7 +11,7 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
-    ['C:/dev/cert-slicer/src/certslice/gui.py'],
+    ['C:\\dev\\cert-slicer\\src\\certslice\\gui.py'],
     pathex=[],
     binaries=binaries,
     datas=datas,

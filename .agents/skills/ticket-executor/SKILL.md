@@ -1,6 +1,6 @@
 ---
 name: ticket-executor
-description: Executes ONE spec-pack ticket as written: read AGENTS.md and the ticket, edit only listed files, run verification, stop after two failures, write the evidence report. Use when told to run a ticket.
+description: "Executes ONE spec-pack ticket as written: read AGENTS.md and the ticket, edit only listed files, run verification, stop after two failures, write the evidence report. Use when told to run a ticket."
 ---
 
 # ticket-executor

@@ -1,0 +1,44 @@
+ticket_meta:
+  id: CS-403-WEB-STUDIO-V3-OVERHAUL
+  epoch: 1
+  goal: Overhaul Web Edition (web.py) to pass DESIGN_CONSTITUTION.md strict lint (0 failures), run 100% offline without external CDNs, sync all workbooks (including For NPS 0726.xlsx) on single/batch approval, support multi-page preview, local folder/FTP modes, and executive analytics
+  touches:
+    - src/certslice/web.py
+    - src/certslice/cli.py
+  depends_on:
+    - CS-402-BULK-PIPELINE-ENHANCEMENT
+  lawgiver_signature: sha256:f95a6264c5908b675760c032aec94ebfb1b11d7ff2dfbb82ec044d8264f37e65
+shared_contracts:
+  scip_symbols:
+    - symbol: scip-python python certslice 0.2.0 `src.certslice.web`/launch_web().
+      signature: "def launch_web(host: str = '0.0.0.0', port: int = 8500, open_browser: bool = True) -> None"
+      lock: sha256:e3e75e59cee3ff4cc45fe87403fb91f6724fab6a2a51d2e60814b7277a5b54e8
+worker_scopes:
+  worker_backend:
+    worker_id: AG5
+    allowed_paths:
+      - src/certslice/cli.py
+  worker_ui:
+    worker_id: AG3
+    allowed_paths:
+      - src/certslice/web.py
+    mandatory_fsm: "@zag-js/core"
+    kinematic_spec:
+      spring_damping_zeta: 0.82
+      target_apca_lc: 75.0
+      optical_trim: "@capsizecss/core"
+  worker_qa_guard:
+    worker_id: AG4
+    role: ADVERSARIAL_BOUNTY
+    allowed_paths:
+      - tests/cs-403-web-studio-v3-overhaul/**
+    forbidden_calls:
+      - jest.mock
+      - vi.mock
+      - sinon.stub
+      - unittest.mock
+      - mock.patch
+      - monkeypatch.setattr
+    mutation_gate:
+      min_kill_score: 0.92
+      target_diff_only: true

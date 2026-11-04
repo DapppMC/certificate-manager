@@ -1,0 +1,22 @@
+{
+  "scip-python python certslice 0.2.0 `src.certslice.bulk`/process_bulk_files().": {
+    "lock": "sha256:e5c2c7046713664af309ab3f213108ebbdb8b2cb5a5c84f95ade8ef482b5a9d2",
+    "owner": "CS-402-BULK-PIPELINE-ENHANCEMENT"
+  },
+  "scip-python python certslice 0.2.0 `src.certslice.database`/load_employees().": {
+    "lock": "sha256:4bca6d2f5579674b5b2c16027fac7a0ca79fffd05fdfaae8142c72a7848121b2",
+    "owner": "CS-401-CORE-SPEED-ENGINE"
+  },
+  "scip-python python certslice 0.2.0 `src.certslice.matcher`/page_candidates().": {
+    "lock": "sha256:5d9dbc4553e3d6ca1f60ec904e38b7e4474396c94de093d716c9cf1cd36bace8",
+    "owner": "CS-401-CORE-SPEED-ENGINE"
+  },
+  "scip-python python certslice 0.2.0 `src.certslice.reviewer`/approve_group().": {
+    "lock": "sha256:d792b3aab20833bf70228d3a53f85e035b663e0c68e92ea0a7de8ba03f8e8695",
+    "owner": "CS-402-BULK-PIPELINE-ENHANCEMENT"
+  },
+  "scip-python python certslice 0.2.0 `src.certslice.web`/launch_web().": {
+    "lock": "sha256:e3e75e59cee3ff4cc45fe87403fb91f6724fab6a2a51d2e60814b7277a5b54e8",
+    "owner": "CS-403-WEB-STUDIO-V3-OVERHAUL"
+  }
+}

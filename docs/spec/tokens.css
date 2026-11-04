@@ -1,0 +1,28 @@
+/* tokens.css - Planner AI 3.0 base semantic variables.
+   All colors and sizes in UI code must resolve to these. Pick ONE archetype per project. */
+:root {
+  /* spacing (4px scale) */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px; --space-8: 32px;
+  /* radii: outer = inner + padding (Layer 3). Example: pad 8 + inner 8 => outer 16 */
+  --radius-inner: 8px; --pad-card: 8px; --radius-outer: calc(var(--radius-inner) + var(--pad-card));
+  /* type */
+  --font-body: "Inter", system-ui, sans-serif; --font-display: var(--font-body); --font-mono: ui-monospace, "JetBrains Mono", monospace;
+  /* motion (Layer 4) */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); --ease-press: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-micro: 140ms; --dur-enter: 180ms; --dur-exit: 110ms; --dur-press: 100ms;
+  /* default: Archetype 1 Precision Dark */
+  --bg-canvas: #09090B; --bg-surface: #121215; --bg-elevated: #18181C;
+  --border-subtle: rgba(255, 255, 255, 0.07); --text: #F4F4F5; --text-muted: #A1A1AA; --accent: #3B82F6;
+}
+[data-archetype="industrial-warm"] {
+  --bg-canvas: #F4F3EF; --bg-surface: #FFFFFF; --bg-elevated: #EAE8E1;
+  --border-subtle: rgba(20, 20, 19, 0.10); --text: #141413; --text-muted: #55534E; --accent: #FF4F00;
+}
+[data-archetype="editorial"] {
+  --bg-canvas: #FAF9F6; --bg-surface: #FFFFFF; --bg-elevated: #F1F0EB;
+  --border-subtle: #E5E4DF; --text: #1A1A18; --text-muted: #55534E; --accent: #1F3A5F;
+  --font-display: "Instrument Serif", serif;
+}
+.num { font-variant-numeric: tabular-nums; }
+h1, h2, h3 { text-wrap: balance; letter-spacing: -0.025em; }
+p { text-wrap: pretty; max-width: 65ch; }

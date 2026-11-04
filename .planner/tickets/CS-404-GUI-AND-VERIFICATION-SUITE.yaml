@@ -1,0 +1,32 @@
+ticket_meta:
+  id: CS-404-GUI-AND-VERIFICATION-SUITE
+  epoch: 1
+  goal: Upgrade Tkinter Desktop GUI (gui.py) with search/filter in ReviewDialog, keyboard shortcuts, determinate progress bar, and Web Studio launcher; fix pytest import-mode configuration and add comprehensive Golden Master + Web API + Performance verification tests
+  touches:
+    - src/certslice/gui.py
+    - pyproject.toml
+    - tests/unit/test_web_and_optimizations.py
+  depends_on:
+    - CS-403-WEB-STUDIO-V3-OVERHAUL
+  lawgiver_signature: sha256:3b64c004eddfecbbd338f5005e9a6db6e084097cb2f66d7db9bf242a76ca41dd
+worker_scopes:
+  worker_backend:
+    worker_id: AG5
+    allowed_paths:
+      - src/certslice/gui.py
+      - pyproject.toml
+  worker_qa_guard:
+    worker_id: AG4
+    role: ADVERSARIAL_BOUNTY
+    allowed_paths:
+      - tests/unit/test_web_and_optimizations.py
+    forbidden_calls:
+      - jest.mock
+      - vi.mock
+      - sinon.stub
+      - unittest.mock
+      - mock.patch
+      - monkeypatch.setattr
+    mutation_gate:
+      min_kill_score: 0.92
+      target_diff_only: true

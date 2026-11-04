@@ -1,0 +1,63 @@
+{
+  "swarm_py": "/home/dapp/AntigravityProfiles/orchestrator/swarm.py",
+  "swarm_py_windows": "C:\\Users\\lenovo\\AntigravityProfiles\\orchestrator\\swarm.py",
+  "model_pattern": "gemini-3.8-flash-{effort}",
+  "default_lead": 1,
+  "argon_capable_leads": [
+    1,
+    6,
+    8
+  ],
+  "workers": {
+    "1": {
+      "role": "Lead Architect & System Integrator",
+      "ports": "3000-3099 / 8000-8099",
+      "tier": "argon_capable"
+    },
+    "2": {
+      "role": "Backend 3NF & ACID Database",
+      "ports": "3100-3199 / 8100-8199",
+      "tier": "flash_worker"
+    },
+    "3": {
+      "role": "Frontend Open Design & Kinetic UI",
+      "ports": "3200-3299 / 8200-8299",
+      "tier": "flash_worker"
+    },
+    "4": {
+      "role": "QA Test Harness & Adversarial Fuzzing",
+      "ports": "3300-3399 / 8300-8399",
+      "tier": "flash_worker"
+    },
+    "5": {
+      "role": "API Endpoints, Middleware & Services",
+      "ports": "3400-3499 / 8400-8499",
+      "tier": "flash_worker"
+    },
+    "6": {
+      "role": "Data Pipeline, Caching & Performance",
+      "ports": "3500-3599 / 8500-8599",
+      "tier": "argon_capable"
+    },
+    "7": {
+      "role": "DevOps, Launcher & Seed Data Factory",
+      "ports": "3600-3699 / 8600-8699",
+      "tier": "gemini_plus"
+    },
+    "8": {
+      "role": "Arbiter, AppSec & Escalation Solver (Planner 4.0)",
+      "ports": "3700-3799 / 8700-8799",
+      "tier": "argon_capable"
+    }
+  },
+  "presets": {
+    "eco": "100% Gemini 3.8 Flash across all 7 workers (limitless quota)",
+    "pro-solo": "1 Argon Thinker Lead (W1 or W6) + 5 Flash Workers + 1 DevOps Seeder",
+    "pro-allout": "Dual-Argon Council (W1 + W6) + 4 Flash Workers + 1 DevOps Seeder"
+  },
+  "default_timeout": 900,
+  "retries": 1,
+  "quota_wait_minutes": 60,
+  "max_quota_waits": 4,
+  "stop_on_gate_failure": true
+}

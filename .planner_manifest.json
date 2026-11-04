@@ -1,0 +1,54 @@
+{
+  "system": "AI Planner System 3.0",
+  "version": "3.0.0",
+  "project_mode": "BROWNFIELD",
+  "status": "READY_FOR_CARTOGRAPHY",
+  "ports": {
+    "AG1": {
+      "dev": "3000-3099",
+      "api": "8000-8099",
+      "role": "Lead Architect (Argon)"
+    },
+    "AG2": {
+      "dev": "3100-3199",
+      "api": "8100-8199",
+      "role": "Backend 3NF/ACID"
+    },
+    "AG3": {
+      "dev": "3200-3299",
+      "api": "8200-8299",
+      "role": "Frontend Open Design"
+    },
+    "AG4": {
+      "dev": "3300-3399",
+      "api": "8300-8399",
+      "role": "QA Test Harness"
+    },
+    "AG5": {
+      "dev": "3400-3499",
+      "api": "8400-8499",
+      "role": "API Endpoints & Middleware"
+    },
+    "AG6": {
+      "dev": "3500-3599",
+      "api": "8500-8599",
+      "role": "Data Pipeline & Caching (Argon)"
+    },
+    "AG7": {
+      "dev": "3600-3699",
+      "api": "8600-8699",
+      "role": "DevOps, Launcher & Seed Data Factory (Plus)"
+    },
+    "AG8": {
+      "dev": "3700-3799",
+      "api": "8700-8799",
+      "role": "The Arbiter: AppSec, concurrency & escalation solver (Argon-capable)"
+    }
+  },
+  "created_at_utc": "2026-10-27T01:31:33Z",
+  "planner4": {
+    "scripts": "scripts/planner4",
+    "state": ".planner",
+    "note": "4.0 engines are installed; the manifest version stays 3.0.0 until the workspace is migrated deliberately."
+  }
+}

@@ -1,0 +1,43 @@
+ticket_meta:
+  id: CS-401-CORE-SPEED-ENGINE
+  epoch: 1
+  goal: Optimize database caching, lock-free thread-local OCR, pre-compiled regexes, and vectorized RapidFuzz candidate matching while preserving 100% golden output invariants
+  touches:
+    - src/certslice/database.py
+    - src/certslice/ocr.py
+    - src/certslice/matcher.py
+    - src/certslice/fields.py
+    - src/certslice/resource_codes.py
+  lawgiver_signature: sha256:b474d98bba2644a862d46d21ba460f8d5fe2f0099e077bbb689605b465315d31
+shared_contracts:
+  scip_symbols:
+    - symbol: scip-python python certslice 0.2.0 `src.certslice.database`/load_employees().
+      signature: "def load_employees(path: Path, cfg: dict) -> list[Employee]"
+      lock: sha256:4bca6d2f5579674b5b2c16027fac7a0ca79fffd05fdfaae8142c72a7848121b2
+    - symbol: scip-python python certslice 0.2.0 `src.certslice.matcher`/page_candidates().
+      signature: "def page_candidates(lines: list[str], employees: list[Employee], cfg: dict) -> list[Candidate]"
+      lock: sha256:5d9dbc4553e3d6ca1f60ec904e38b7e4474396c94de093d716c9cf1cd36bace8
+worker_scopes:
+  worker_backend:
+    worker_id: AG5
+    allowed_paths:
+      - src/certslice/database.py
+      - src/certslice/ocr.py
+      - src/certslice/matcher.py
+      - src/certslice/fields.py
+      - src/certslice/resource_codes.py
+  worker_qa_guard:
+    worker_id: AG4
+    role: ADVERSARIAL_BOUNTY
+    allowed_paths:
+      - tests/cs-401-core-speed-engine/**
+    forbidden_calls:
+      - jest.mock
+      - vi.mock
+      - sinon.stub
+      - unittest.mock
+      - mock.patch
+      - monkeypatch.setattr
+    mutation_gate:
+      min_kill_score: 0.92
+      target_diff_only: true

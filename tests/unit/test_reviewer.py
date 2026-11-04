@@ -130,3 +130,111 @@ def test_approve_group_empty_nid(tmp_path: Path):
     assert (run_dir / "data.xlsx").exists()
     assert len(get_review_items(run_dir)) == 0
 
+
+def test_approve_group_replaces_review_file(tmp_path: Path):
+    """Test that approving a review item cleanly replaces the [REVIEW]_ file on disk."""
+    run_dir = tmp_path / "run-replace-test"
+    pdf_dir = run_dir / "pdf"
+    pdf_dir.mkdir(parents=True)
+
+    # Create dummy initial [REVIEW]_ file
+    old_review_name = "[REVIEW]_8109060PT_RAKHMAT HIDAYAT_Sertifikat.pdf"
+    old_pdf_path = pdf_dir / old_review_name
+    doc = pymupdf.open()
+    doc.new_page(width=300, height=400)
+    doc.save(old_pdf_path)
+    doc.close()
+    assert old_pdf_path.exists()
+
+    plan_data = {
+        "mode": "bulk",
+        "input_pdf": str(old_pdf_path),
+        "groups": [
+            {
+                "id": 1,
+                "pages": [1],
+                "status": "review",
+                "reason": "Judul sertifikat tidak dapat dideteksi secara spesifik",
+                "nid": "8109060PT",
+                "nama": "RAKHMAT HIDAYAT",
+                "raw_name": "RAKHMAT HIDAYAT",
+                "candidates": [
+                    {"nid": "8109060PT", "nama": "RAKHMAT HIDAYAT", "score": 100.0, "unit": "UPK SEBALANG"}
+                ],
+                "fields": {
+                    "title": {"value": "Ahli K3 Umum", "confidence": "high"},
+                    "issue_date": {"value": "2025-05-15", "confidence": "high"},
+                    "expiry_date": {"value": "2028-05-15", "confidence": "high"},
+                    "number": {"value": "5/123/AS.02.04/V/2025", "confidence": "high"},
+                    "is_skp": {"value": False, "confidence": "high"},
+                    "level": {"value": "", "confidence": "high"},
+                    "peran": {"value": "", "confidence": "high"},
+                },
+                "file_name": old_review_name,
+                "review_file_name": old_review_name,
+                "src_pdf": str(old_pdf_path),
+                "is_bundle": False,
+            }
+        ],
+    }
+    (run_dir / "plan.json").write_text(json.dumps(plan_data, indent=2), encoding="utf-8")
+
+    # Approve item with custom title Ahli K3 Umum
+    approved_name = approve_group(
+        run_dir=run_dir,
+        group_id=1,
+        nid="8109060PT",
+        nama="RAKHMAT HIDAYAT",
+        unit="UPK SEBALANG",
+        custom_title="Ahli K3 Umum",
+    )
+
+    assert approved_name == "8109060PT_RAKHMAT HIDAYAT_Ahli K3 Umum.pdf"
+    assert "[REVIEW]" not in approved_name
+    assert (pdf_dir / approved_name).exists()
+    # The old [REVIEW]_ file must be completely deleted/replaced!
+    assert not old_pdf_path.exists()
+    assert not (pdf_dir / f"[REVIEW]_{approved_name}").exists()
+    # Review items list is now empty
+    assert len(get_review_items(run_dir)) == 0
+
+
+def test_get_review_items_nested_subdirectories(tmp_path: Path):
+    root_run = tmp_path / "Hasil_Test_Multi"
+    root_run.mkdir()
+
+    # Create depth 1 subfolder
+    sub1 = root_run / "Folder1"
+    sub1.mkdir()
+    p1 = {
+        "mode": "bulk",
+        "groups": [
+            {"id": 1, "status": "accepted", "pages": [1]},
+            {"id": 2, "status": "unmatched", "pages": [2], "reason": "test1", "candidates": []},
+        ],
+    }
+    (sub1 / "plan.json").write_text(json.dumps(p1), encoding="utf-8")
+
+    # Create depth 3 nested subfolder
+    sub_nested = root_run / "Nested" / "Deep" / "Folder2"
+    sub_nested.mkdir(parents=True)
+    p2 = {
+        "mode": "bulk",
+        "groups": [
+            {"id": 1, "status": "unmatched", "pages": [1], "reason": "test2", "candidates": []},
+            {"id": 2, "status": "accepted", "pages": [2]},
+            {"id": 3, "status": "review", "pages": [3], "reason": "test3", "candidates": []},
+        ],
+    }
+    (sub_nested / "plan.json").write_text(json.dumps(p2), encoding="utf-8")
+
+    items = get_review_items(root_run)
+    assert len(items) == 3
+
+    # Check that _plan_dir and _plan_path are properly assigned
+    dirs = [it["_plan_dir"] for it in items]
+    assert str(sub1) in dirs
+    assert str(sub_nested) in dirs
+
+
+

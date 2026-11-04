@@ -1,0 +1,12 @@
+# Gate -2 db_schema discovery: raw SQL passed to query()/execute() calls.
+# Run: ast-grep scan -r tools/sgrecipes/extract_sql_queries.yml <dir>
+id: extract-sql-queries
+language: TypeScript
+severity: hint
+message: "SQL call: $SQL"
+rule:
+  any:
+    - pattern: $DB.query($SQL)
+    - pattern: $DB.query($SQL, $$$ARGS)
+    - pattern: $DB.execute($SQL)
+    - pattern: $DB.execute($SQL, $$$ARGS)

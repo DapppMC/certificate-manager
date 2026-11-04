@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Subcommand: web
     web_parser = subparsers.add_parser("web", help="Launch web interface in browser")
-    web_parser.add_argument("--port", type=int, default=8250, help="Port to run web server (default: 8250)")
+    web_parser.add_argument("--port", type=int, default=8500, help="Port to run web server (default: 8500)")
     web_parser.add_argument("--host", default="0.0.0.0", help="Host interface (default: 0.0.0.0)")
     web_parser.add_argument("--no-browser", action="store_true", help="Do not automatically open browser")
 

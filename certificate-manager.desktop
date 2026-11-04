@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=Certificate Manager (Web Studio v3.0)
+GenericName=Manajer Sertifikat & Slicer Web Studio
+Comment=Pemrosesan PDF sertifikat otomatis, OCR, analitik SKP & pencocokan database pegawai (Web Studio)
+Exec=/home/dapp/Projects/cert_slicer/launch_app.sh
+Icon=/home/dapp/.local/share/icons/certificate-manager.png
+Terminal=false
+Type=Application
+Categories=Office;Utility;Development;
+Keywords=Certificate;Slicer;PDF;OCR;Manager;Pegawai;Sertifikat;Web;Studio;
+StartupWMClass=CertificateManager
+StartupNotify=true

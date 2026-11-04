@@ -1,13 +1,43 @@
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 import re
+import threading
 
 import openpyxl
 
 from certslice.errors import InputError
 from certslice.models import Employee
 from certslice.normalize import normalize_name
+
+_EMPLOYEE_CACHE: dict[tuple, list[Employee]] = {}
+_CACHE_LOCK = threading.Lock()
+
+
+def clear_employee_cache() -> None:
+    """Clear the in-memory employee workbook cache."""
+    with _CACHE_LOCK:
+        _EMPLOYEE_CACHE.clear()
+
+
+def _build_cache_key(path: Path, cfg: dict) -> tuple | None:
+    try:
+        st = path.stat()
+        resolved = str(path.resolve())
+    except OSError:
+        return None
+    db_cfg = cfg.get("database", {})
+    cfg_key = (
+        tuple(db_cfg.get("preferred_sheets", ["data master"])),
+        int(db_cfg.get("header_search_rows", 10)),
+        tuple(db_cfg.get("nid", ["nid"])),
+        tuple(db_cfg.get("nama", ["nama"])),
+        tuple(db_cfg.get("email", ["email"])),
+        tuple(db_cfg.get("unit", ["unit"])),
+        tuple(db_cfg.get("jabatan", ["jabatan"])),
+    )
+    return (resolved, st.st_mtime_ns, st.st_size, cfg_key)
 
 
 def header_key(v) -> str:
@@ -23,6 +53,13 @@ def _find_column_index(keys: list[str], aliases: list[str]) -> int:
 
 def load_employees(path: Path, cfg: dict) -> list[Employee]:
     path = Path(path)
+    cache_key = _build_cache_key(path, cfg)
+    if cache_key is not None:
+        with _CACHE_LOCK:
+            cached = _EMPLOYEE_CACHE.get(cache_key)
+            if cached is not None:
+                return [copy.copy(e) for e in cached]
+
     try:
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     except Exception as e:
@@ -123,6 +160,10 @@ def load_employees(path: Path, cfg: dict) -> list[Employee]:
 
         if not employees:
             raise InputError("database has no employee rows below the header")
+
+        if cache_key is not None:
+            with _CACHE_LOCK:
+                _EMPLOYEE_CACHE[cache_key] = [copy.copy(e) for e in employees]
 
         return employees
     finally:

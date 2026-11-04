@@ -42,3 +42,8 @@ hasil/
 spikes/output/
 build/
 dist/
+
+*.zip
+*.xlsx
+certslice_settings.json
+

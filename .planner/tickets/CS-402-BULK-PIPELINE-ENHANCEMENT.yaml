@@ -1,0 +1,41 @@
+ticket_meta:
+  id: CS-402-BULK-PIPELINE-ENHANCEMENT
+  epoch: 1
+  goal: Optimize bulk.py and reviewer.py with vectorized candidate search, shared OCR engine reuse across multi-folder trees, and complete workbook resync on review approval
+  touches:
+    - src/certslice/bulk.py
+    - src/certslice/reviewer.py
+    - src/certslice/pipeline.py
+  depends_on:
+    - CS-401-CORE-SPEED-ENGINE
+  lawgiver_signature: sha256:50b989162d07573797a7d3c197b5fe020bf3d9ca005b8934a5b3e7777f15c544
+shared_contracts:
+  scip_symbols:
+    - symbol: scip-python python certslice 0.2.0 `src.certslice.bulk`/process_bulk_files().
+      signature: "def process_bulk_files(pdf_paths: list[Path], db_path: Path, out_dir: Path, ...) -> BulkResult"
+      lock: sha256:e5c2c7046713664af309ab3f213108ebbdb8b2cb5a5c84f95ade8ef482b5a9d2
+    - symbol: scip-python python certslice 0.2.0 `src.certslice.reviewer`/approve_group().
+      signature: "def approve_group(run_dir: Path, group_id: int, nid: str, nama: str, ...) -> str"
+      lock: sha256:d792b3aab20833bf70228d3a53f85e035b663e0c68e92ea0a7de8ba03f8e8695
+worker_scopes:
+  worker_backend:
+    worker_id: AG5
+    allowed_paths:
+      - src/certslice/bulk.py
+      - src/certslice/reviewer.py
+      - src/certslice/pipeline.py
+  worker_qa_guard:
+    worker_id: AG4
+    role: ADVERSARIAL_BOUNTY
+    allowed_paths:
+      - tests/cs-402-bulk-pipeline-enhancement/**
+    forbidden_calls:
+      - jest.mock
+      - vi.mock
+      - sinon.stub
+      - unittest.mock
+      - mock.patch
+      - monkeypatch.setattr
+    mutation_gate:
+      min_kill_score: 0.92
+      target_diff_only: true

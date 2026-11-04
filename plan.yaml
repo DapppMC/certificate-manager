@@ -1,0 +1,98 @@
+{
+  "epoch": 1,
+  "defaults": {
+    "package": "certslice",
+    "version": "0.2.0",
+    "kinematic_spec": {
+      "spring_damping_zeta": 0.82,
+      "target_apca_lc": 75.0,
+      "optical_trim": "@capsizecss/core"
+    },
+    "mutation_gate": {
+      "min_kill_score": 0.92,
+      "target_diff_only": true
+    }
+  },
+  "items": [
+    {
+      "id": "CS-401-CORE-SPEED-ENGINE",
+      "goal": "Optimize database caching, lock-free thread-local OCR, pre-compiled regexes, and vectorized RapidFuzz candidate matching while preserving 100% golden output invariants",
+      "depends_on": [],
+      "touches": [
+        "src/certslice/database.py",
+        "src/certslice/ocr.py",
+        "src/certslice/matcher.py",
+        "src/certslice/fields.py",
+        "src/certslice/resource_codes.py"
+      ],
+      "symbols": [
+        {
+          "name": "load_employees",
+          "file": "src/certslice/database.py",
+          "kind": "function",
+          "signature": "def load_employees(path: Path, cfg: dict) -> list[Employee]"
+        },
+        {
+          "name": "page_candidates",
+          "file": "src/certslice/matcher.py",
+          "kind": "function",
+          "signature": "def page_candidates(lines: list[str], employees: list[Employee], cfg: dict) -> list[Candidate]"
+        }
+      ]
+    },
+    {
+      "id": "CS-402-BULK-PIPELINE-ENHANCEMENT",
+      "goal": "Optimize bulk.py and reviewer.py with vectorized candidate search, shared OCR engine reuse across multi-folder trees, and complete workbook resync on review approval",
+      "depends_on": ["CS-401-CORE-SPEED-ENGINE"],
+      "touches": [
+        "src/certslice/bulk.py",
+        "src/certslice/reviewer.py",
+        "src/certslice/pipeline.py"
+      ],
+      "symbols": [
+        {
+          "name": "process_bulk_files",
+          "file": "src/certslice/bulk.py",
+          "kind": "function",
+          "signature": "def process_bulk_files(pdf_paths: list[Path], db_path: Path, out_dir: Path, ...) -> BulkResult"
+        },
+        {
+          "name": "approve_group",
+          "file": "src/certslice/reviewer.py",
+          "kind": "function",
+          "signature": "def approve_group(run_dir: Path, group_id: int, nid: str, nama: str, ...) -> str"
+        }
+      ]
+    },
+    {
+      "id": "CS-403-WEB-STUDIO-V3-OVERHAUL",
+      "goal": "Overhaul Web Edition (web.py) to pass DESIGN_CONSTITUTION.md strict lint (0 failures), run 100% offline without external CDNs, sync all workbooks (including For NPS 0726.xlsx) on single/batch approval, support multi-page preview, local folder/FTP modes, and executive analytics",
+      "depends_on": ["CS-402-BULK-PIPELINE-ENHANCEMENT"],
+      "touches": [
+        "src/certslice/web.py",
+        "src/certslice/cli.py"
+      ],
+      "roles": {
+        "src/certslice/web.py": "worker_ui"
+      },
+      "symbols": [
+        {
+          "name": "launch_web",
+          "file": "src/certslice/web.py",
+          "kind": "function",
+          "signature": "def launch_web(host: str = '0.0.0.0', port: int = 8500, open_browser: bool = True) -> None"
+        }
+      ]
+    },
+    {
+      "id": "CS-404-GUI-AND-VERIFICATION-SUITE",
+      "goal": "Upgrade Tkinter Desktop GUI (gui.py) with search/filter in ReviewDialog, keyboard shortcuts, determinate progress bar, and Web Studio launcher; fix pytest import-mode configuration and add comprehensive Golden Master + Web API + Performance verification tests",
+      "depends_on": ["CS-403-WEB-STUDIO-V3-OVERHAUL"],
+      "touches": [
+        "src/certslice/gui.py",
+        "pyproject.toml",
+        "tests/unit/test_web_and_optimizations.py"
+      ]
+    }
+  ]
+}

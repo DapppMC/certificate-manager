@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 import urllib.error
@@ -14,24 +15,44 @@ from certslice.models import Candidate, Employee
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 SETTINGS_FILE = Path.home() / ".certslice_settings.json"
+LOCAL_SETTINGS_FILE = Path(__file__).resolve().parent.parent.parent / "certslice_settings.json"
 
 
 def load_user_settings() -> dict[str, Any]:
+    data: dict[str, Any] = {}
+    target_file = None
+
     if SETTINGS_FILE.exists():
+        target_file = SETTINGS_FILE
+    elif LOCAL_SETTINGS_FILE.exists():
+        target_file = LOCAL_SETTINGS_FILE
+
+    if target_file:
         try:
-            data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-            if data.get("gemini_model") in ["gemini-2.0-flash-lite", "gemini-2.5-flash-lite"] or data.get("model") in ["gemini-2.0-flash-lite", "gemini-2.5-flash-lite"]:
-                data["gemini_model"] = "gemini-flash-lite-latest"
-                data["model"] = "gemini-flash-lite-latest"
-                try:
-                    SETTINGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-                except Exception:
-                    pass
-            return data
+            data = json.loads(target_file.read_text(encoding="utf-8"))
         except Exception:
-            pass
-    return {"gemini_api_key": "", "use_ai": False, "model": "gemini-flash-lite-latest", "gemini_model": "gemini-flash-lite-latest"}
+            data = {}
+
+    # Normalize model to only gemini-flash-lite-latest
+    if data.get("gemini_model") != "gemini-flash-lite-latest" or data.get("model") != "gemini-flash-lite-latest":
+        data["gemini_model"] = "gemini-flash-lite-latest"
+        data["model"] = "gemini-flash-lite-latest"
+
+    # Default pre-filled API key
+    if not data.get("gemini_api_key"):
+        data["gemini_api_key"] = DEFAULT_GEMINI_API_KEY
+
+    if "use_ai" not in data:
+        data["use_ai"] = True
+
+    try:
+        SETTINGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    return data
 
 
 def save_user_settings(settings: dict[str, Any] | None = None, **kwargs: Any) -> None:
@@ -41,7 +62,15 @@ def save_user_settings(settings: dict[str, Any] | None = None, **kwargs: Any) ->
             current.update(settings)
         if kwargs:
             current.update(kwargs)
+        # Enforce model
+        current["gemini_model"] = "gemini-flash-lite-latest"
+        current["model"] = "gemini-flash-lite-latest"
+
         SETTINGS_FILE.write_text(json.dumps(current, indent=2), encoding="utf-8")
+        try:
+            LOCAL_SETTINGS_FILE.write_text(json.dumps(current, indent=2), encoding="utf-8")
+        except Exception:
+            pass
     except Exception as exc:
         logger.warning("Could not save settings to %s: %s", SETTINGS_FILE, exc)
 
@@ -95,6 +124,8 @@ class GeminiRescue:
             "- 'level': Extract occupation level (e.g. 'Pelaksana Madya', 'Pelaksana Utama', 'Operator Senior', etc.).\n"
             "- 'peran': Extract competency role/job title on certificate or details (e.g. 'Operator junior lokal peralatan bantu boiler', 'Pemeliharaan Generator PLTD', etc.).\n"
             "- If not an SKP certificate, set is_skp to false, level to null, peran to null, and put the course/certificate name in 'title'.\n"
+            "- Do NOT abbreviate role or certificate titles (e.g. write 'Ahli K3 Umum' NOT 'AK3 Umum', write 'Operator Batu Bara' NOT 'OP Batu Bara'). Always preserve the full original wording from the document.\n"
+            "- Do NOT add words like 'Perpanjangan' to title or peran unless 'Perpanjangan' is explicitly part of the title on the certificate.\n"
             "- If none of the candidates match, set matched_option_id to null."
         )
 

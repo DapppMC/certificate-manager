@@ -16,24 +16,29 @@ from pathlib import Path
 import re
 import shutil
 import threading
+import zipfile
 from typing import Any, Callable
 
+import numpy as np
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 import pymupdf
-from rapidfuzz import fuzz
+from rapidfuzz import fuzz, process
 
 from certslice.config import load_config
 from certslice.database import load_employees
-from certslice.fields import extract_dates, extract_title
+from certslice.fields import extract_dates, extract_title, smart_extract_dates
 from certslice.gemini import GeminiRescue, load_user_settings
 from certslice.grouping import PageInfo, group_pages
+from certslice.levels import GLOBAL_SKP_LEVEL_TITLES, clean_skp_peran, get_numeric_level, resolve_skp_level
 from certslice.matcher import cue_filter, decide, page_candidates
 from certslice.models import Candidate, Employee
+from certslice.mso import build_for_nps_workbook
 from certslice.naming import clean_field
 from certslice.normalize import fold, name_tokens
-from certslice.ocr import OcrEngine
+from certslice.ocr import OcrEngine, get_ocr_engine
 from certslice.pipeline import extract_raw_holder_name
+from certslice.resource_codes import get_resource_code_catalog, lookup_resource_code
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +72,155 @@ class BulkItem:
     candidates: list[dict[str, Any]] = field(default_factory=list)
     pages: list[int] = field(default_factory=lambda: [0])  # 0-indexed pages in src_path
     is_bundle: bool = False
+    resource_code: str = ""
+    institute_code: str = ""
+    ftp_duplicate: bool = False
+    ftp_existing_path: str = ""
+
+
+_FTP_CATALOG_CACHE: dict[str, Any] = {"loaded": False, "by_nid": {}, "entries": []}
+
+
+def _load_ftp_catalog_for_guard(catalog_path: Path | None = None) -> dict[str, Any]:
+    """Load and index Synology FTP catalog (82,989 files) for instant FTP Duplicate Guard."""
+    if _FTP_CATALOG_CACHE["loaded"] and catalog_path is None:
+        return _FTP_CATALOG_CACHE
+
+    candidates = []
+    if catalog_path:
+        candidates.append(Path(catalog_path))
+    env_p = os.environ.get("SYNOLOGY_FTP_CATALOG_PATH")
+    if env_p:
+        candidates.append(Path(env_p))
+    candidates.extend([
+        Path("/home/dapp/Projects/Program_1/synology_ftp_catalog.json"),
+        Path(__file__).resolve().parent.parent.parent / "synology_ftp_catalog.json",
+    ])
+
+    target_path = next((p for p in candidates if p.exists()), None)
+    by_nid: dict[str, list[dict[str, Any]]] = {}
+    entries: list[dict[str, Any]] = []
+
+    if target_path:
+        try:
+            raw = json.loads(target_path.read_text(encoding="utf-8"))
+            files = raw.get("files", raw) if isinstance(raw, dict) else raw
+            if isinstance(files, list):
+                for f in files:
+                    if not isinstance(f, dict):
+                        continue
+                    fname = str(f.get("name") or f.get("file_name") or "")
+                    fpath = str(f.get("path") or f.get("full_path") or fname)
+                    nid_val = str(f.get("nid") or "").strip().upper()
+                    if not nid_val and "_" in fname:
+                        first_tok = fname.split("_", 1)[0].strip().upper()
+                        if len(first_tok) >= 6 and any(ch.isdigit() for ch in first_tok):
+                            nid_val = first_tok
+                    rec = {"name": fname, "path": fpath, "nid": nid_val, "hay": f"{fname} {fpath}".lower()}
+                    entries.append(rec)
+                    if nid_val:
+                        by_nid.setdefault(nid_val, []).append(rec)
+        except Exception as exc:
+            logger.debug("FTP catalog guard load skipped: %s", exc)
+
+    if catalog_path is None:
+        _FTP_CATALOG_CACHE["loaded"] = True
+        _FTP_CATALOG_CACHE["by_nid"] = by_nid
+        _FTP_CATALOG_CACHE["entries"] = entries
+        return _FTP_CATALOG_CACHE
+    return {"loaded": True, "by_nid": by_nid, "entries": entries}
+
+
+def check_ftp_duplicate(
+    nid: str,
+    nama: str,
+    judul: str = "",
+    year: str = "",
+    catalog_path: Path | None = None,
+) -> dict[str, Any]:
+    """Check if a certificate already exists in the Synology FTP Server catalog."""
+    cat = _load_ftp_catalog_for_guard(catalog_path)
+    nid_clean = re.sub(r"[^A-Z0-9]", "", (nid or "").upper())
+    nama_clean = (nama or "").strip().lower()
+    judul_tokens = [
+        t for t in re.split(r"[^a-z0-9]+", (judul or "").lower())
+        if len(t) >= 3 and t not in {"sertifikat", "sertifikasi", "pelatihan", "dan", "the", "for", "level"}
+    ]
+
+    pool: list[dict[str, Any]] = []
+    if nid_clean and nid_clean in cat["by_nid"]:
+        pool = cat["by_nid"][nid_clean]
+    elif nama_clean and len(nama_clean) >= 4:
+        name_toks = [t for t in nama_clean.split() if len(t) >= 3]
+        if name_toks:
+            pool = [e for e in cat["entries"][:25000] if all(nt in e["hay"] for nt in name_toks)]
+
+    for cand in pool:
+        hay = cand["hay"]
+        if not judul_tokens or any(jt in hay for jt in judul_tokens):
+            if not year or year in hay:
+                return {
+                    "is_duplicate": True,
+                    "ftp_path": cand["path"],
+                    "ftp_name": cand["name"],
+                }
+
+    return {"is_duplicate": False, "ftp_path": "", "ftp_name": ""}
+
+
+def expand_pdf_or_zip_inputs(input_paths: list[Path], extract_dir: Path | None = None) -> list[Path]:
+    """Expand a list of .pdf or .zip paths into a flat list of PDF paths, auto-extracting .zip archives."""
+    expanded: list[Path] = []
+    for p in input_paths:
+        path_obj = Path(p)
+        if not path_obj.exists():
+            continue
+        suffix = path_obj.suffix.lower()
+        if suffix == ".pdf":
+            expanded.append(path_obj)
+        elif suffix == ".zip":
+            target_ext = extract_dir or (path_obj.parent / f"_unzipped_{path_obj.stem}")
+            target_ext.mkdir(parents=True, exist_ok=True)
+            try:
+                with zipfile.ZipFile(path_obj, "r") as zf:
+                    for member in zf.infolist():
+                        if member.is_dir() or not member.filename.lower().endswith(".pdf"):
+                            continue
+                        safe_member_name = Path(member.filename).name
+                        if safe_member_name.startswith(".") or safe_member_name.startswith("__MACOSX"):
+                            continue
+                        out_pdf = target_ext / safe_member_name
+                        counter = 2
+                        while out_pdf.exists():
+                            out_pdf = target_ext / f"{Path(safe_member_name).stem}_{counter}.pdf"
+                            counter += 1
+                        with zf.open(member) as src_f:
+                            out_pdf.write_bytes(src_f.read())
+                        expanded.append(out_pdf)
+            except Exception as exc:
+                logger.warning("Gagal mengekstrak arsip ZIP %s: %s", path_obj, exc)
+    return expanded
+
+
+def merge_companion_pdfs(pdf_paths: list[Path], out_path: Path) -> Path:
+    """Merge companion PDFs (e.g., SK + Sertifikat) into a single combined PDF file."""
+    valid_paths = [Path(p) for p in pdf_paths if Path(p).exists()]
+    if not valid_paths:
+        raise ValueError("Tidak ada berkas PDF yang valid untuk digabungkan.")
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    merged_doc = pymupdf.open()
+    try:
+        for p in valid_paths:
+            src_doc = pymupdf.open(p)
+            try:
+                merged_doc.insert_pdf(src_doc)
+            finally:
+                src_doc.close()
+        merged_doc.save(out_path)
+    finally:
+        merged_doc.close()
+    return out_path
 
 
 @dataclass
@@ -76,6 +230,7 @@ class BulkResult:
     accepted_count: int
     review_count: int
     items: list[BulkItem]
+    lampiran_items: list[BulkItem] = field(default_factory=list)
 
 
 def is_roster_doc(pdf_path: Path, ocr_engine: OcrEngine | None = None) -> bool:
@@ -670,15 +825,25 @@ def find_bulk_candidates(
                         extra_cands.append(Candidate(index=idx, score=min(90.0, sim), line=0, partial=True))
                         seen_indices.add(idx)
 
-        # Whole string fuzzy match
+        # Whole string fuzzy match (vectorized C++ batch scoring)
         q_fold = fold(q)
-        for idx, emp in enumerate(employees):
-            if idx in seen_indices:
-                continue
-            r = fuzz.token_sort_ratio(q_fold, emp.norm)
-            if r >= 85:
-                extra_cands.append(Candidate(index=idx, score=float(r), line=0, partial=True))
-                seen_indices.add(idx)
+        if q_fold and employees:
+            emp_norms = [emp.norm for emp in employees]
+            ts_scores = process.cdist(
+                [q_fold],
+                emp_norms,
+                scorer=fuzz.token_sort_ratio,
+                score_cutoff=85.0,
+                dtype=np.float64,
+            )[0]
+            for idx in np.flatnonzero(ts_scores >= 85.0):
+                idx_int = int(idx)
+                if idx_int in seen_indices:
+                    continue
+                extra_cands.append(
+                    Candidate(index=idx_int, score=float(ts_scores[idx_int]), line=0, partial=True)
+                )
+                seen_indices.add(idx_int)
 
     all_cands = clean_cands + extra_cands
 
@@ -727,29 +892,40 @@ def _detect_skp_offline(full_text: str) -> tuple[bool, str, str]:
     upper = full_text.upper()
     is_skp = any(kw in upper for kw in [
         "SKP TENAGA LISTRIK", "PT. SKP", "PT.SERTIFIKASIKOMPETENSI",
-        "PEMBANGKITAN TENAGA LISTRIK", "DJL.4", "KOMPETENSI INTI"
+        "PEMBANGKITAN TENAGA LISTRIK", "DJL.4", "KOMPETENSI INTI",
+        "SERTIFIKAT KOMPETENSI", "STANDAR KOMPETENSI", "KETENAGALISTRIKAN",
+        "DJK", "BNSP", "KEMNAKER",
     ])
     level = ""
     peran = ""
+
+    # Check if any standard level title is directly in text
+    for num, title_str in GLOBAL_SKP_LEVEL_TITLES.items():
+        if title_str.upper() in upper:
+            is_skp = True
+            level = title_str.title()
+            break
+
     if not is_skp:
         return False, "", ""
 
-    # Try extracting level
-    lvl_match = re.search(
-        r"bagi\s+(Pelaksana\s+[A-Za-z]+|Operator\s+[A-Za-z]+|Teknisi\s+[A-Za-z]+|Assistant\s+Engineer|Junior\s+Analyst|Ahli\s+[A-Za-z]+)",
-        full_text,
-        re.IGNORECASE,
-    )
-    if lvl_match:
-        level = lvl_match.group(1).strip()
-    else:
-        lvl_num = re.search(r"Level\s*([1-9])", full_text, re.IGNORECASE)
-        if lvl_num:
-            level = f"Level {lvl_num.group(1)}"
+    # Try extracting level if not yet matched
+    if not level:
+        lvl_match = re.search(
+            r"bagi\s+(Pelaksana\s+[A-Za-z]+|Operator\s+[A-Za-z]+|Teknisi\s+[A-Za-z]+|Assistant\s+Engineer|Junior\s+Analyst|Ahli\s+[A-Za-z]+)",
+            full_text,
+            re.IGNORECASE,
+        )
+        if lvl_match:
+            level = lvl_match.group(1).strip()
         else:
-            lvl_jenj = re.search(r"KUALIFIKASI\s*\.?\s*([1-9])", full_text, re.IGNORECASE)
-            if lvl_jenj:
-                level = f"Level {lvl_jenj.group(1)}"
+            lvl_num = re.search(r"Level\s*([1-9])", full_text, re.IGNORECASE)
+            if lvl_num:
+                level = f"Level {lvl_num.group(1)}"
+            else:
+                lvl_jenj = re.search(r"KUALIFIKASI\s*\.?\s*([1-9])", full_text, re.IGNORECASE)
+                if lvl_jenj:
+                    level = f"Level {lvl_jenj.group(1)}"
 
     # Try extracting peran
     peran_match = re.search(
@@ -778,6 +954,7 @@ def _detect_skp_offline(full_text: str) -> tuple[bool, str, str]:
             if cand_j and not any(bad in cand_j.lower() for bad in ["profesi", "occupational", "description", "deskripsi", "/"]):
                 peran = cand_j
 
+    peran = clean_skp_peran(peran)
     return True, level, peran
 
 
@@ -787,8 +964,10 @@ _cache_lock = threading.Lock()
 def get_optimal_worker_count() -> int:
     """Calculate safe, balanced worker count based on CPU cores."""
     cpus = os.cpu_count() or 2
-    if cpus <= 4:
-        return 2  # Safe for dual/quad core low-spec laptops
+    if cpus <= 2:
+        return 1  # Safe for dual-core low-spec laptops (leaves 1 core free for UI/system)
+    elif cpus <= 4:
+        return 2  # Safe for quad-core low-spec laptops
     elif cpus <= 8:
         return 3
     else:
@@ -1037,6 +1216,19 @@ def _extract_job_record(
     iss_date = ""
     exp_date = ""
 
+    # Smart date extraction from full_text for all certificates
+    is_k3_cert = (
+        "k3" in full_text.lower()
+        or "kemnaker" in full_text.lower()
+        or "keselamatan" in full_text.lower()
+        or "kesehatan kerja" in full_text.lower()
+    )
+    s_iss, s_exp = smart_extract_dates(full_text, is_k3=is_k3_cert)
+    if s_iss:
+        iss_date = s_iss.isoformat()
+    if s_exp:
+        exp_date = s_exp.isoformat()
+
     if not is_skp_off:
         m_prog = re.search(r"for successfully completed\s+(?:the\s+)?(.+?)(?:\s+and is able|\n|$)", full_text, re.IGNORECASE)
         if m_prog:
@@ -1047,11 +1239,62 @@ def _extract_job_record(
             t_val, _ = extract_title(all_lines, tmpl_lines, job.is_bundle, len(job.pages), cfg)
             if t_val and not any(bad in t_val.lower() for bad in ["the knowledge acquired", "is able to apply", "training in practice"]):
                 doc_title = t_val
-        iv, _, ev, _ = extract_dates(all_lines, cfg)
-        if iv:
-            iss_date = iv.isoformat()
-        if ev:
-            exp_date = ev.isoformat()
+
+        # Specific prominent certificate title detection (User rule: if specific operator like Operator Bulldozer, prefer that over generic Ahli K3 Umum)
+        if not doc_title or any(g in doc_title.lower() for g in ["sertifikat", "certificate", "kompetensi", "surat keputusan", "keputusan menteri"]):
+            m_op = re.search(
+                r"\b(Operator\s+(?:Bulldozer|Forklift|Boiler|Crane|Genset|Wheel\s+Loader|Excavator|Turbin|Overhead\s+Crane|Mobile\s+Crane|Rigger|Scaffolding|Batu\s*Bara|Unit\s+PLTU))\b",
+                full_text,
+                re.IGNORECASE,
+            )
+            if m_op:
+                doc_title = m_op.group(1).strip()
+            elif re.search(r"\b(?:Ahli\s+K3\s+Umum|Ahli\s+Keselamatan\s+dan\s+Kesehatan\s+Kerja\s+Umum|AK3\s+Umum)\b", full_text, re.IGNORECASE):
+                doc_title = "Ahli K3 Umum"
+            elif re.search(r"\b(?:Ahli\s+K3\s+Listrik|Teknisi\s+K3\s+Listrik)\b", full_text, re.IGNORECASE):
+                m_l = re.search(r"\b(Ahli\s+K3\s+Listrik|Teknisi\s+K3\s+Listrik)\b", full_text, re.IGNORECASE)
+                doc_title = m_l.group(1).strip() if m_l else "Ahli K3 Listrik"
+            elif re.search(r"\bAuditor\s+SMK3\b", full_text, re.IGNORECASE):
+                doc_title = "Auditor SMK3"
+            elif re.search(r"\bPetugas\s+P3K\b", full_text, re.IGNORECASE):
+                doc_title = "Petugas P3K"
+            elif re.search(r"\b(?:Petugas\s+Peran\s+Kebakaran|Regu\s+Penanggulangan\s+Kebakaran)\b", full_text, re.IGNORECASE):
+                m_f = re.search(r"\b(Petugas\s+Peran\s+Kebakaran|Regu\s+Penanggulangan\s+Kebakaran)\b", full_text, re.IGNORECASE)
+                doc_title = m_f.group(1).strip() if m_f else "Petugas Peran Kebakaran"
+            elif re.search(r"\bSupervisi\s+Scaffolding\b", full_text, re.IGNORECASE):
+                doc_title = "Supervisi Scaffolding"
+            else:
+                m_pen = re.search(
+                    r"(?:PENUNJUKAN|BIDANG|SEBAGAI|TENTANG)\s+([A-Za-z0-9\s\/\-\(\)]{4,50}?)(?:\n|KEPADA|ATAS\s+NAMA|DENGAN\s+KUALIFIKASI|TINGKAT|KELAS)",
+                    full_text,
+                    re.IGNORECASE,
+                )
+                if m_pen:
+                    cand_pen = m_pen.group(1).strip(" :-_.\t\r\n")
+                    if not any(ign in cand_pen.lower() for ign in ["nomor", "menteri", "pegawai", "pt pln", "tahun"]):
+                        doc_title = cand_pen
+
+        # Expand abbreviations and clean unwanted renewal prefixes
+        if doc_title:
+            doc_title = re.sub(r"^(?:Hasil\s+)?Perpanjangan\s+(?:Lisensi\s+|Sertifikasi\s+|Sertifikat\s+)?", "", doc_title, flags=re.IGNORECASE).strip()
+            doc_title = re.sub(r"\bAK3\s*Umum\b", "Ahli K3 Umum", doc_title, flags=re.IGNORECASE)
+            doc_title = re.sub(r"\bAK3\b", "Ahli K3", doc_title, flags=re.IGNORECASE)
+            doc_title = re.sub(r"\bOP\s+Batu\s*Bara\b", "Operator Batu Bara", doc_title, flags=re.IGNORECASE)
+            doc_title = re.sub(r"\bOP\b", "Operator", doc_title, flags=re.IGNORECASE)
+
+        # Flag generic titles like "Sertifikat" for review instead of marking accepted
+        is_generic_title = not doc_title or doc_title.strip().lower() in ["sertifikat", "certificate", "-", "none"]
+        if is_generic_title and status == "accepted":
+            status = "review"
+            reason = "Judul sertifikat tidak dapat dideteksi secara spesifik (berupa generic 'Sertifikat' atau kode)"
+
+        # Fallback to general date extraction if smart extraction did not find dates
+        if not iss_date or not exp_date:
+            iv, _, ev, _ = extract_dates(all_lines, cfg)
+            if iv and not iss_date:
+                iss_date = iv.isoformat()
+            if ev and not exp_date:
+                exp_date = ev.isoformat()
 
         # Relative validity period calculation (e.g. 'berlaku 3 tahun', 'valid for 3 years')
         if not exp_date and iss_date:
@@ -1071,6 +1314,14 @@ def _extract_job_record(
                     exp_date = exp_dt.isoformat()
                 except Exception:
                     pass
+    else:
+        # For SKP, if we have iss_date but no exp_date, default to +3 years (or +5 years if K3)
+        if iss_date and not exp_date:
+            try:
+                iss_dt = datetime.fromisoformat(iss_date).date()
+                exp_date = iss_dt.replace(year=iss_dt.year + (5 if is_k3_cert else 3)).isoformat()
+            except Exception:
+                pass
 
     # Roster table enrichment (Dual-Key Matching: Cert No first, then Name)
     r_match = None
@@ -1149,11 +1400,12 @@ def _extract_job_record(
             doc_title = f"Lampiran ({aux_cat_detected})"
             reason = f"Dokumen pendukung ({aux_cat_detected})"
 
-    # Check if 100% resolved locally
+    # Check if 100% resolved locally (generic title 'Sertifikat' needs AI rescue or review)
+    is_generic_title = not is_skp_off and (not doc_title or doc_title.strip().lower() in ["sertifikat", "certificate", "-", "none"])
     is_resolved_locally = (
         is_roster_doc_text
         or bool(aux_cat_detected)
-        or (status == "accepted" and top is not None and (not is_skp_off or (lvl_off and peran_off)))
+        or (status == "accepted" and top is not None and not is_generic_title and (not is_skp_off or (lvl_off and peran_off)))
     )
     needs_ai = bool(use_ai and has_rescue_engine and not is_resolved_locally)
 
@@ -1185,17 +1437,22 @@ def process_bulk_files(
     pdf_paths: list[Path],
     db_path: Path,
     out_dir: Path,
+    pages_per_cert: str = "auto",
     use_ai: bool = True,
     gemini_api_key: str | None = None,
     gemini_model: str = "gemini-flash-lite-latest",
     run_name: str | None = None,
     progress_callback: Callable[[int, int, str], None] | None = None,
     use_ocr: bool = True,
+    komparasi_path: Path | None = None,
+    mso_path: Path | None = None,
 ) -> BulkResult:
     """Unified smart processor: handles 1 bundle, 20+ single files, or mixed folders with automatic roster enrichment."""
+    if komparasi_path and Path(komparasi_path).exists():
+        get_resource_code_catalog(komparasi_path)
     cfg = load_config(None)
     employees = load_employees(db_path, cfg)
-    ocr_engine = OcrEngine(dpi=130) if use_ocr else None
+    ocr_engine = get_ocr_engine(dpi=130) if use_ocr else None
 
     if use_ai and not gemini_api_key:
         settings = load_user_settings()
@@ -1214,7 +1471,7 @@ def process_bulk_files(
 
     target_run_dir = out_dir / run_name
     counter = 2
-    while target_run_dir.exists():
+    while target_run_dir.exists() and any(target_run_dir.iterdir()):
         target_run_dir = out_dir / f"{run_name}_{counter}"
         counter += 1
     target_run_dir.mkdir(parents=True, exist_ok=True)
@@ -1222,33 +1479,66 @@ def process_bulk_files(
     pdf_out_dir = target_run_dir / "pdf"
     pdf_out_dir.mkdir(parents=True, exist_ok=True)
 
+    # Auto-expand any .zip archives inside pdf_paths
+    if any(Path(p).suffix.lower() == ".zip" for p in pdf_paths):
+        pdf_paths = expand_pdf_or_zip_inputs(pdf_paths, extract_dir=target_run_dir / "_zip_extracted")
+
     if progress_callback:
-        progress_callback(1, len(pdf_paths), "Menganalisis dokumen & mendeteksi struktur lampiran...")
+        progress_callback(1, max(1, len(pdf_paths)), "Menganalisis dokumen & mendeteksi struktur lampiran...")
 
     text_cache: dict[tuple[str, int], str] = {}
 
     # Step 1: Deconstruct into CertJobs & Roster docs
     jobs, roster_paths, roster_entries, aux_paths = prepare_cert_jobs(
-        pdf_paths, employees, cfg, ocr_engine, text_cache=text_cache, progress_callback=progress_callback
+        pdf_paths,
+        employees,
+        cfg,
+        ocr_engine,
+        pages_per_cert=pages_per_cert,
+        text_cache=text_cache,
+        progress_callback=progress_callback,
     )
     total_jobs = len(jobs)
 
-    # Copy roster documents to output
+    # Copy roster documents to output and track in lampiran_items
+    lampiran_items: list[BulkItem] = []
     for r_idx, r_path in enumerate(roster_paths, 1):
         target_name = "Lampiran_Surat_Pengantar.pdf" if len(roster_paths) == 1 else f"Lampiran_Surat_Pengantar_{r_path.stem}.pdf"
         shutil.copy2(r_path, pdf_out_dir / target_name)
         logger.info("Menyimpan dokumen roster ke: %s", target_name)
+        lampiran_items.append(
+            BulkItem(
+                index=len(lampiran_items) + 1,
+                src_path=r_path,
+                file_name=target_name,
+                nid="-",
+                nama="-",
+                jabatan="-",
+                unit="-",
+                is_skp=False,
+                level="-",
+                peran="-",
+                judul="Surat Pengantar / Daftar Rekap",
+                number="-",
+                issue_date="-",
+                expiry_date="-",
+                status="accepted",
+                reason="Dokumen rekap/surat pengantar otomatis terdeteksi",
+                candidates=[],
+                pages=[0],
+                is_bundle=False,
+            )
+        )
 
-    # Copy auxiliary non-certificate documents to output
-    aux_items: list[BulkItem] = []
+    # Copy auxiliary non-certificate documents to output and track in lampiran_items
     for a_idx, (a_path, a_cat) in enumerate(aux_paths, 1):
         clean_cat = clean_field(a_cat)
         target_aux_name = f"[LAMPIRAN]_{clean_cat}_{clean_field(a_path.stem)}.pdf"
         shutil.copy2(a_path, pdf_out_dir / target_aux_name)
         logger.info("Menyimpan lampiran non-sertifikat: %s -> %s", a_path.name, target_aux_name)
-        aux_items.append(
+        lampiran_items.append(
             BulkItem(
-                index=0,
+                index=len(lampiran_items) + 1,
                 src_path=a_path,
                 file_name=target_aux_name,
                 nid="-",
@@ -1475,10 +1765,19 @@ def process_bulk_files(
             doc_title = peran if is_skp else "Sertifikat"
 
         # Build clean filename
+        if is_skp:
+            resolved_level = resolve_skp_level(level, full_text=doc_title)
+            resolved_peran = clean_skp_peran(peran or doc_title)
+            clean_level_str = clean_field(resolved_level)
+            clean_peran_str = clean_field(resolved_peran)
+        else:
+            resolved_level = level
+            resolved_peran = peran
+            clean_level_str = clean_field(level)
+            clean_peran_str = clean_field(peran or doc_title)
+
         clean_nid_str = clean_field(emp_nid)
         clean_nama_str = clean_field(emp_nama)
-        clean_level_str = clean_field(level)
-        clean_peran_str = clean_field(peran or doc_title)
         clean_judul_str = clean_field(doc_title)
 
         if is_roster or is_aux:
@@ -1509,6 +1808,24 @@ def process_bulk_files(
         else:
             shutil.copy2(job.src_pdf, target_pdf_path)
 
+        # Resolve Resource Code from Komparasi catalog
+        raw_text_val = "\n".join(rec.get("all_lines", [])) or pdf_path.stem
+        rc_info = lookup_resource_code(
+            title=doc_title or (resolved_peran if is_skp else peran),
+            level=resolved_level if is_skp else level,
+            jabatan=emp_jabatan,
+            raw_text=raw_text_val,
+        )
+        rc_val = rc_info.get("code", "")
+        inst_val = rc_info.get("institute", "D002")
+
+        ftp_chk = check_ftp_duplicate(
+            nid=emp_nid,
+            nama=emp_nama,
+            judul=doc_title or (resolved_peran if is_skp else peran),
+            year=rec["iss_date"][:4] if rec["iss_date"] and len(rec["iss_date"]) >= 4 else "",
+        )
+
         item = BulkItem(
             index=rec["idx"],
             src_path=pdf_path,
@@ -1518,8 +1835,8 @@ def process_bulk_files(
             jabatan=emp_jabatan,
             unit=emp_unit,
             is_skp=is_skp,
-            level=level,
-            peran=peran,
+            level=resolved_level if is_skp else level,
+            peran=resolved_peran if is_skp else peran,
             judul=doc_title,
             number=rec["doc_num"],
             issue_date=rec["iss_date"],
@@ -1529,16 +1846,29 @@ def process_bulk_files(
             candidates=cand_dicts,
             pages=job.pages,
             is_bundle=job.is_bundle,
+            resource_code=rc_val,
+            institute_code=inst_val,
+            ftp_duplicate=bool(ftp_chk.get("is_duplicate", False)),
+            ftp_existing_path=str(ftp_chk.get("ftp_path", "")),
         )
+        if is_roster or is_aux:
+            lampiran_items.append(item)
+            continue
+
         items.append(item)
 
-    # Append auxiliary documents to items list
-    for a_it in aux_items:
-        a_it.index = len(items) + 1
-        items.append(a_it)
+    # Re-index certificate items cleanly from 1 to N
+    for c_idx, it in enumerate(items, 1):
+        it.index = c_idx
 
-    # 4. Write Single Combined data.xlsx and manifest_slice.xlsx
-    _write_bulk_workbooks(target_run_dir, items)
+    # Dedicated workbook for auxiliary/lampiran documents (segregated from certificates!)
+    if lampiran_items:
+        for l_idx, l_it in enumerate(lampiran_items, 1):
+            l_it.index = l_idx
+        _write_auxiliary_workbook(target_run_dir, lampiran_items)
+
+    # 4. Write Single Combined data.xlsx, manifest_slice.xlsx, and For NPS 0726.xlsx (Certificates only!)
+    _write_bulk_workbooks(target_run_dir, items, template_path=mso_path)
 
     # 5. Write plan.json for ReviewDialog compatibility
     _write_bulk_plan_json(target_run_dir, items, db_path)
@@ -1552,11 +1882,89 @@ def process_bulk_files(
         accepted_count=accepted_cnt,
         review_count=review_cnt,
         items=items,
+        lampiran_items=lampiran_items,
     )
 
 
-def _write_bulk_workbooks(run_dir: Path, items: list[BulkItem]) -> None:
-    """Generate a clean, professional unified data.xlsx and manifest_slice.xlsx."""
+def _write_auxiliary_workbook(run_dir: Path, items: list[BulkItem]) -> Path:
+    """Generate a clean, dedicated rekap_lampiran_dokumen.xlsx for non-certificate documents."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Rekap Lampiran Dokumen"
+
+    headers = [
+        "No",
+        "Nama File Lampiran",
+        "File Asal",
+        "Kategori Dokumen",
+        "Keterangan / Deteksi",
+        "Ukuran Berkas",
+    ]
+    header_font = Font(name="Segoe UI", size=10, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="334155", end_color="334155", fill_type="solid")
+    border_thin = Border(
+        left=Side(style="thin", color="CBD5E1"),
+        right=Side(style="thin", color="CBD5E1"),
+        top=Side(style="thin", color="CBD5E1"),
+        bottom=Side(style="thin", color="CBD5E1"),
+    )
+    align_center = Alignment(horizontal="center", vertical="center")
+    align_left = Alignment(horizontal="left", vertical="center")
+
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = align_center
+        cell.border = border_thin
+
+    row_fill_even = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+    row_fill_odd = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+
+    for row_idx, it in enumerate(items, 2):
+        fill = row_fill_even if row_idx % 2 == 0 else row_fill_odd
+        f_size = "-"
+        try:
+            p = run_dir / "pdf" / it.file_name
+            if p.exists():
+                f_size = f"{round(p.stat().st_size / 1024, 1)} KB"
+            elif it.src_path.exists():
+                f_size = f"{round(it.src_path.stat().st_size / 1024, 1)} KB"
+        except Exception:
+            pass
+
+        vals = [
+            row_idx - 1,
+            it.file_name,
+            it.src_path.name,
+            it.judul,
+            it.reason,
+            f_size,
+        ]
+        for col_idx, v in enumerate(vals, 1):
+            c = ws.cell(row=row_idx, column=col_idx, value="" if v is None else str(v))
+            c.font = Font(name="Segoe UI", size=9)
+            c.fill = fill
+            c.border = border_thin
+            if col_idx in [1, 6]:
+                c.alignment = align_center
+            else:
+                c.alignment = align_left
+
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = min(max(max_len + 3, 12), 50)
+
+    ws.row_dimensions[1].height = 26
+    out_path = run_dir / "rekap_lampiran_dokumen.xlsx"
+    wb.save(out_path)
+    wb.close()
+    return out_path
+
+
+def _write_bulk_workbooks(run_dir: Path, items: list[BulkItem], template_path: Path | None = None) -> None:
+    """Generate a clean, professional unified data.xlsx, manifest_slice.xlsx, and For NPS 0726.xlsx."""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Rekap Sertifikat"
@@ -1573,6 +1981,7 @@ def _write_bulk_workbooks(run_dir: Path, items: list[BulkItem]) -> None:
         "Judul Sertifikat / Pelatihan",
         "Level (Khusus SKP)",
         "Peran Kompetensi (Khusus SKP)",
+        "Resource Code",
         "Nomor Sertifikat",
         "Tanggal Terbit",
         "Tanggal Expired",
@@ -1617,6 +2026,7 @@ def _write_bulk_workbooks(run_dir: Path, items: list[BulkItem]) -> None:
             it.judul,
             it.level,
             it.peran,
+            it.resource_code,
             it.number,
             it.issue_date,
             it.expiry_date,
@@ -1628,11 +2038,11 @@ def _write_bulk_workbooks(run_dir: Path, items: list[BulkItem]) -> None:
             c.font = Font(name="Segoe UI", size=9)
             c.fill = fill
             c.border = border_thin
-            if col_idx in [1, 4, 13, 14]:
+            if col_idx in [1, 4, 12, 14, 15]:
                 c.alignment = align_center
             else:
                 c.alignment = align_left
-            if col_idx == 15:
+            if col_idx == 16:
                 c.font = status_font_ok if it.status == "accepted" else status_font_rev
                 c.alignment = align_center
 
@@ -1646,6 +2056,73 @@ def _write_bulk_workbooks(run_dir: Path, items: list[BulkItem]) -> None:
     wb.save(run_dir / "data.xlsx")
     wb.save(run_dir / "manifest_slice.xlsx")
     wb.close()
+
+    # Generate individual per-participant Excel workbooks in Excel_Per_Peserta/
+    try:
+        per_peserta_dir = run_dir / "Excel_Per_Peserta"
+        per_peserta_dir.mkdir(parents=True, exist_ok=True)
+        for it in items:
+            wb_p = openpyxl.Workbook()
+            ws_p = wb_p.active
+            ws_p.title = "Rekap Sertifikat"
+            for col_idx, h in enumerate(headers, 1):
+                c = ws_p.cell(row=1, column=col_idx, value=h)
+                c.font = header_font
+                c.fill = header_fill
+                c.alignment = align_center
+                c.border = border_thin
+            vals_p = [
+                1,
+                it.src_path.name,
+                it.file_name,
+                it.nid,
+                it.nama,
+                it.jabatan,
+                it.unit,
+                "SKP Ketenagalistrikan" if it.is_skp else "Sertifikat Standar",
+                it.judul,
+                it.level,
+                it.peran,
+                it.resource_code,
+                it.number,
+                it.issue_date,
+                it.expiry_date,
+                "Tervalidasi" if it.status == "accepted" else "Perlu Review",
+                it.reason if it.status != "accepted" else "-",
+            ]
+            for col_idx, v in enumerate(vals_p, 1):
+                c = ws_p.cell(row=2, column=col_idx, value="" if v is None else str(v))
+                c.font = Font(name="Segoe UI", size=9)
+                c.fill = row_fill_even
+                c.border = border_thin
+            stem_p = Path(it.file_name).stem if it.file_name else f"{clean_field(it.nid or 'NID')}_{clean_field(it.nama or 'Peserta')}_{it.index}"
+            wb_p.save(per_peserta_dir / f"{stem_p}.xlsx")
+            wb_p.close()
+    except Exception as exc:
+        logger.warning("Could not generate Excel_Per_Peserta workbooks: %s", exc)
+
+    # Generate For NPS 0726.xlsx if any SKP / level certificates exist
+    try:
+        mso_items = []
+        for it in items:
+            mso_items.append({
+                "nid": it.nid,
+                "nama": it.nama,
+                "level": it.level,
+                "is_skp": it.is_skp,
+                "judul": it.judul,
+                "peran": it.peran,
+                "resource_code": it.resource_code,
+                "institute_code": getattr(it, "institute_code", "D002"),
+                "effective_date": it.issue_date,
+                "exp_date": it.expiry_date,
+                "subfolder_name": run_dir.name,
+                "file_name": it.file_name or it.src_path.name,
+            })
+        if any(x.get("is_skp") or x.get("level") or (x.get("resource_code") and str(x.get("resource_code")).strip() not in ["-", ""]) for x in mso_items):
+            build_for_nps_workbook(mso_items, run_dir / "For NPS 0726.xlsx", template_path=template_path)
+    except Exception as exc:
+        logger.warning("Could not generate For NPS 0726.xlsx: %s", exc)
 
 
 def _write_bulk_plan_json(run_dir: Path, items: list[BulkItem], db_path: Path) -> None:
@@ -1689,12 +2166,110 @@ def _write_bulk_plan_json(run_dir: Path, items: list[BulkItem], db_path: Path) -
     (run_dir / "plan.json").write_text(json.dumps(plan_data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def resync_bulk_outputs(
+    run_dir: Path,
+    items: list[BulkItem],
+    db_path: Path | None = None,
+    mso_path: Path | None = None,
+) -> None:
+    """Re-synchronize data.xlsx, manifest_slice.xlsx, For NPS 0726.xlsx, and plan.json after user approvals."""
+    _write_bulk_workbooks(run_dir, items, template_path=mso_path)
+    _write_bulk_plan_json(run_dir, items, db_path or Path("database.xlsx"))
+
+
+def merge_companion_items_in_run(
+    run_dir: Path,
+    items: list[BulkItem],
+    item_indices: list[int] | None = None,
+    db_path: Path | None = None,
+    mso_path: Path | None = None,
+) -> dict[str, Any]:
+    """Merge companion PDFs (e.g., SK + Sertifikat) either for specified item_indices or auto-detected by same NID/Nama."""
+    pdf_dir = run_dir / "pdf"
+    merged_groups: list[list[BulkItem]] = []
+
+    if item_indices and len(item_indices) >= 2:
+        idx_set = set(item_indices)
+        selected = [it for it in items if it.index in idx_set]
+        if len(selected) >= 2:
+            merged_groups.append(selected)
+    else:
+        by_holder: dict[str, list[BulkItem]] = {}
+        for it in items:
+            key = (it.nid if it.nid and it.nid != "-" else it.nama).strip().upper()
+            if not key or key == "-":
+                continue
+            by_holder.setdefault(key, []).append(it)
+        for group in by_holder.values():
+            if len(group) >= 2:
+                merged_groups.append(group)
+
+    if not merged_groups:
+        return {"merged_count": 0, "new_total": len(items), "merged_files": []}
+
+    removed_indices: set[int] = set()
+    merged_files: list[str] = []
+
+    for group in merged_groups:
+        primary = group[0]
+        pdf_paths_to_merge: list[Path] = []
+        for g_it in group:
+            p = pdf_dir / g_it.file_name if g_it.file_name else g_it.src_path
+            if not p.exists() and g_it.src_path.exists():
+                p = g_it.src_path
+            if p.exists():
+                pdf_paths_to_merge.append(p)
+        if len(pdf_paths_to_merge) < 2:
+            continue
+
+        out_pdf = pdf_dir / primary.file_name
+        merge_companion_pdfs(pdf_paths_to_merge, out_pdf)
+        try:
+            doc_m = pymupdf.open(out_pdf)
+            primary.pages = list(range(len(doc_m)))
+            doc_m.close()
+        except Exception:
+            pass
+        primary.src_path = out_pdf
+        primary.is_bundle = False
+        merged_files.append(primary.file_name)
+
+        for extra_it in group[1:]:
+            removed_indices.add(extra_it.index)
+            extra_pdf = pdf_dir / extra_it.file_name
+            if extra_pdf.exists() and extra_pdf != out_pdf:
+                try:
+                    extra_pdf.unlink()
+                except Exception:
+                    pass
+
+    if removed_indices:
+        items[:] = [it for it in items if it.index not in removed_indices]
+        for idx_new, it in enumerate(items, 1):
+            it.index = idx_new
+        resync_bulk_outputs(run_dir, items, db_path=db_path, mso_path=mso_path)
+
+    return {
+        "merged_count": len(merged_files),
+        "new_total": len(items),
+        "merged_files": merged_files,
+    }
+
+
 def update_bulk_workbooks_from_groups(run_dir: Path, groups: list[dict[str, Any]]) -> None:
     """Rebuild data.xlsx and manifest_slice.xlsx from plan.json groups after user approval in review dialog."""
     items: list[BulkItem] = []
     for g in groups:
         f = g.get("fields", {})
         is_skp_val = f.get("is_skp", {}).get("value")
+        judul_val = f.get("title", {}).get("value") or ""
+        level_val = f.get("level", {}).get("value") or ""
+        peran_val = f.get("peran", {}).get("value") or ""
+        rc_info = lookup_resource_code(
+            title=judul_val or peran_val,
+            level=level_val,
+            raw_text=g.get("file_name", ""),
+        )
         items.append(
             BulkItem(
                 index=g.get("id", 1),
@@ -1705,9 +2280,9 @@ def update_bulk_workbooks_from_groups(run_dir: Path, groups: list[dict[str, Any]
                 jabatan=g.get("jabatan") or "",
                 unit=g.get("unit") or "",
                 is_skp=bool(is_skp_val),
-                level=f.get("level", {}).get("value") or "",
-                peran=f.get("peran", {}).get("value") or "",
-                judul=f.get("title", {}).get("value") or "",
+                level=level_val,
+                peran=peran_val,
+                judul=judul_val,
                 number=f.get("number", {}).get("value") or "",
                 issue_date=f.get("issue_date", {}).get("value") or "",
                 expiry_date=f.get("expiry_date", {}).get("value") or "",
@@ -1716,6 +2291,1087 @@ def update_bulk_workbooks_from_groups(run_dir: Path, groups: list[dict[str, Any]
                 candidates=g.get("candidates", []),
                 pages=[p - 1 for p in g.get("pages", [1])],
                 is_bundle=bool(g.get("is_bundle", False)),
+                resource_code=rc_info.get("code", ""),
+                institute_code=rc_info.get("institute", "D002"),
             )
         )
     _write_bulk_workbooks(run_dir, items)
+
+    # If this subfolder is part of a multi-folder batch, refresh master workbooks at root
+    master_dir = None
+    cur = run_dir.parent
+    while cur != cur.parent:
+        if (cur / "rekap_seluruh_sertifikat.xlsx").exists():
+            master_dir = cur
+            break
+        cur = cur.parent
+
+    if master_dir:
+        try:
+            master_items = []
+            for sub_p in sorted(master_dir.rglob("plan.json")):
+                try:
+                    rel_path = sub_p.parent.relative_to(master_dir)
+                    rel_f_name = str(rel_path).replace("\\", "/")
+                except Exception:
+                    rel_f_name = sub_p.parent.name
+                sub_d = json.loads(sub_p.read_text(encoding="utf-8"))
+                for sg in sub_d.get("groups", []):
+                    sf = sg.get("fields", {})
+                    s_is_skp = sf.get("is_skp", {}).get("value")
+                    s_judul = sf.get("title", {}).get("value") or ""
+                    s_level = sf.get("level", {}).get("value") or ""
+                    s_peran = sf.get("peran", {}).get("value") or ""
+                    s_rc = lookup_resource_code(
+                        title=s_judul or s_peran,
+                        level=s_level,
+                        raw_text=sg.get("file_name", ""),
+                    )
+                    master_items.append((
+                        rel_f_name,
+                        BulkItem(
+                            index=sg.get("id", 1),
+                            src_path=Path(sg.get("src_pdf", "")),
+                            file_name=sg.get("file_name", ""),
+                            nid=sg.get("nid") or "",
+                            nama=sg.get("nama") or "",
+                            jabatan=sg.get("jabatan") or "",
+                            unit=sg.get("unit") or "",
+                            is_skp=bool(s_is_skp),
+                            level=s_level,
+                            peran=s_peran,
+                            judul=s_judul,
+                            number=sf.get("number", {}).get("value") or "",
+                            issue_date=sf.get("issue_date", {}).get("value") or "",
+                            expiry_date=sf.get("expiry_date", {}).get("value") or "",
+                            status=sg.get("status", "accepted"),
+                            reason=sg.get("reason", ""),
+                            resource_code=s_rc.get("code", ""),
+                            institute_code=s_rc.get("institute", "D002"),
+                        ),
+                    ))
+            if master_items:
+                _write_master_tree_workbook(master_dir, master_items)
+        except Exception:
+            pass
+
+
+# =============================================================================
+# MULTI-FOLDER BATCH & PRE-FORMATTED FTP PROCESSOR (ENTERPRISE EXTENSIONS)
+# =============================================================================
+
+@dataclass
+class MultiFolderResult:
+    run_dir: Path
+    total_folders: int
+    total_files: int
+    accepted_count: int
+    review_count: int
+    folder_results: dict[str, BulkResult]
+    master_excel_path: Path
+    master_lampiran_excel_path: Path | None = None
+
+
+def optimize_process_priority() -> None:
+    """Optimize process priority and thread pools to prevent freezing on low-end laptops."""
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+    os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        kernel32.SetPriorityClass.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.SetPriorityClass.restype = wintypes.BOOL
+        handle = kernel32.GetCurrentProcess()
+        BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
+        kernel32.SetPriorityClass(handle, BELOW_NORMAL_PRIORITY_CLASS)
+    except Exception:
+        pass
+
+
+def find_all_pdf_folders(root_dir: Path) -> list[tuple[Path, list[Path]]]:
+    """Find all directories within root_dir (including root_dir) that directly contain PDF files."""
+    root = Path(root_dir).resolve()
+    folder_map: dict[Path, list[Path]] = {}
+    for pdf_file in root.rglob("*.pdf"):
+        # Ignore temporary or hidden directories
+        if any(part.startswith(".") for part in pdf_file.parts):
+            continue
+        parent = pdf_file.parent
+        folder_map.setdefault(parent, []).append(pdf_file)
+
+    sorted_folders = sorted(folder_map.keys(), key=lambda p: (len(p.parts), str(p)))
+    return [(f, sorted(folder_map[f])) for f in sorted_folders]
+
+
+def _write_master_tree_workbook(
+    target_run_dir: Path,
+    master_items: list[tuple[str, BulkItem]],
+    template_path: Path | None = None,
+) -> Path:
+    """Generate master consolidated Excel across all subfolders with corporate styling."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Rekap Seluruh Sertifikat"
+
+    headers = [
+        "No",
+        "Subfolder / Kategori",
+        "File Asal",
+        "Nama File Baru",
+        "NID",
+        "Nama Pegawai",
+        "Jabatan",
+        "Unit Kerja",
+        "Tipe Dokumen",
+        "Judul Sertifikat / Pelatihan",
+        "Level (Khusus SKP)",
+        "Peran Kompetensi (Khusus SKP)",
+        "Resource Code",
+        "Nomor Sertifikat",
+        "Tanggal Terbit",
+        "Tanggal Expired",
+        "Status Validasi",
+        "Keterangan / Alasan Review",
+    ]
+
+    header_font = Font(name="Segoe UI", size=10, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1E40AF", end_color="1E40AF", fill_type="solid")
+    border_thin = Border(
+        left=Side(style="thin", color="CBD5E1"),
+        right=Side(style="thin", color="CBD5E1"),
+        top=Side(style="thin", color="CBD5E1"),
+        bottom=Side(style="thin", color="CBD5E1"),
+    )
+    align_center = Alignment(horizontal="center", vertical="center")
+    align_left = Alignment(horizontal="left", vertical="center")
+
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = align_center
+        cell.border = border_thin
+
+    row_fill_even = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+    row_fill_odd = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+    status_font_ok = Font(name="Segoe UI", size=9, bold=True, color="047857")
+    status_font_rev = Font(name="Segoe UI", size=9, bold=True, color="B45309")
+
+    for row_idx, (folder_name, it) in enumerate(master_items, 2):
+        fill = row_fill_even if row_idx % 2 == 0 else row_fill_odd
+        vals = [
+            row_idx - 1,
+            folder_name,
+            it.src_path.name,
+            it.file_name,
+            it.nid,
+            it.nama,
+            it.jabatan,
+            it.unit,
+            "SKP Ketenagalistrikan" if it.is_skp else "Sertifikat Standar",
+            it.judul,
+            it.level,
+            it.peran,
+            it.resource_code,
+            it.number,
+            it.issue_date,
+            it.expiry_date,
+            "Tervalidasi" if it.status == "accepted" else "Perlu Review",
+            it.reason if it.status != "accepted" else "-",
+        ]
+        for col_idx, v in enumerate(vals, 1):
+            c = ws.cell(row=row_idx, column=col_idx, value="" if v is None else str(v))
+            c.font = Font(name="Segoe UI", size=9)
+            c.fill = fill
+            c.border = border_thin
+            if col_idx in [1, 5, 13, 15, 16]:
+                c.alignment = align_center
+            else:
+                c.alignment = align_left
+            if col_idx == 17:
+                c.font = status_font_ok if it.status == "accepted" else status_font_rev
+                c.alignment = align_center
+
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = min(max(max_len + 3, 11), 45)
+
+    ws.row_dimensions[1].height = 26
+
+    master_path = target_run_dir / "rekap_seluruh_sertifikat.xlsx"
+    wb.save(master_path)
+    wb.save(target_run_dir / "data.xlsx")
+    wb.close()
+
+    # Generate master For NPS 0726.xlsx
+    try:
+        mso_items = []
+        for folder_name, it in master_items:
+            mso_items.append({
+                "nid": it.nid,
+                "nama": it.nama,
+                "level": it.level,
+                "is_skp": it.is_skp,
+                "judul": it.judul,
+                "peran": it.peran,
+                "resource_code": it.resource_code,
+                "institute_code": getattr(it, "institute_code", "D002"),
+                "effective_date": it.issue_date,
+                "exp_date": it.expiry_date,
+                "subfolder_name": folder_name,
+                "file_name": it.file_name or it.src_path.name,
+            })
+        if any(x.get("is_skp") or x.get("level") or (x.get("resource_code") and str(x.get("resource_code")).strip() not in ["-", ""]) for x in mso_items):
+            build_for_nps_workbook(mso_items, target_run_dir / "For NPS 0726.xlsx", template_path=template_path)
+    except Exception as exc:
+        logger.warning("Could not generate master For NPS 0726.xlsx: %s", exc)
+
+    return master_path
+
+
+def _write_master_lampiran_workbook(target_run_dir: Path, master_lampiran: list[tuple[str, BulkItem]]) -> Path:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Rekap Seluruh Lampiran"
+
+    headers = [
+        "No",
+        "Subfolder",
+        "Nama File Lampiran",
+        "File Asal",
+        "Kategori Dokumen",
+        "Keterangan / Deteksi",
+        "Ukuran Berkas",
+    ]
+    header_font = Font(name="Segoe UI", size=10, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="334155", end_color="334155", fill_type="solid")
+    border_thin = Border(
+        left=Side(style="thin", color="CBD5E1"),
+        right=Side(style="thin", color="CBD5E1"),
+        top=Side(style="thin", color="CBD5E1"),
+        bottom=Side(style="thin", color="CBD5E1"),
+    )
+    align_center = Alignment(horizontal="center", vertical="center")
+    align_left = Alignment(horizontal="left", vertical="center")
+
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = align_center
+        cell.border = border_thin
+
+    row_fill_even = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+    row_fill_odd = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+
+    for row_idx, (folder_name, it) in enumerate(master_lampiran, 2):
+        fill = row_fill_even if row_idx % 2 == 0 else row_fill_odd
+        f_size = "-"
+        try:
+            p = target_run_dir / folder_name / "pdf" / it.file_name
+            if p.exists():
+                f_size = f"{round(p.stat().st_size / 1024, 1)} KB"
+            elif it.src_path.exists():
+                f_size = f"{round(it.src_path.stat().st_size / 1024, 1)} KB"
+        except Exception:
+            pass
+
+        vals = [
+            row_idx - 1,
+            folder_name,
+            it.file_name,
+            it.src_path.name,
+            it.judul,
+            it.reason,
+            f_size,
+        ]
+        for col_idx, v in enumerate(vals, 1):
+            c = ws.cell(row=row_idx, column=col_idx, value="" if v is None else str(v))
+            c.font = Font(name="Segoe UI", size=9)
+            c.fill = fill
+            c.border = border_thin
+            if col_idx in [1, 7]:
+                c.alignment = align_center
+            else:
+                c.alignment = align_left
+
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = min(max(max_len + 3, 12), 50)
+
+    ws.row_dimensions[1].height = 26
+    master_lampiran_path = target_run_dir / "rekap_seluruh_lampiran.xlsx"
+    wb.save(master_lampiran_path)
+    wb.close()
+    return master_lampiran_path
+
+
+def process_multi_folder_tree(
+    root_dir: Path,
+    db_path: Path,
+    out_dir: Path,
+    pages_per_cert: str = "auto",
+    use_ai: bool = True,
+    gemini_api_key: str | None = None,
+    gemini_model: str = "gemini-flash-lite-latest",
+    use_ocr: bool = True,
+    progress_callback: Callable[[int, int, str], None] | None = None,
+    komparasi_path: Path | None = None,
+    mso_path: Path | None = None,
+) -> MultiFolderResult:
+    """Process an entire directory tree containing multiple subfolders of certificates.
+    
+    Mirrors subfolder structure in out_dir, saves per-subfolder renamed PDFs + data.xlsx,
+    and produces a Master consolidated rekap_seluruh_sertifikat.xlsx at the root.
+    """
+    if komparasi_path and Path(komparasi_path).exists():
+        get_resource_code_catalog(komparasi_path)
+    optimize_process_priority()
+    root = Path(root_dir).resolve()
+    pdf_folders = find_all_pdf_folders(root)
+    if not pdf_folders:
+        raise ValueError(f"Tidak ditemukan berkas PDF di dalam folder atau subfolder:\n{root}")
+
+    total_files = sum(len(pdfs) for _, pdfs in pdf_folders)
+    total_folders = len(pdf_folders)
+
+    # Prepare root output directory
+    timestamp_str = datetime.now().strftime("%d-%b-%Y_%H.%M")
+    clean_root_name = clean_field(root.name) or "PDF_Mentah"
+    target_run_dir = Path(out_dir).resolve() / f"Hasil_{clean_root_name}_{timestamp_str}"
+    counter = 2
+    while target_run_dir.exists():
+        target_run_dir = Path(out_dir).resolve() / f"Hasil_{clean_root_name}_{timestamp_str}_{counter}"
+        counter += 1
+    target_run_dir.mkdir(parents=True, exist_ok=True)
+
+    folder_results: dict[str, BulkResult] = {}
+    master_items: list[tuple[str, BulkItem]] = []
+    master_lampiran_items: list[tuple[str, BulkItem]] = []
+    processed_count = 0
+    total_accepted = 0
+    total_review = 0
+
+    for f_idx, (folder_path, pdf_paths) in enumerate(pdf_folders, 1):
+        try:
+            rel_path = folder_path.relative_to(root)
+        except ValueError:
+            rel_path = Path(folder_path.name)
+
+        rel_str = str(rel_path).replace("\\", "/")
+        if rel_str == ".":
+            rel_str = root.name
+
+        sub_target_dir = target_run_dir / rel_path
+        sub_target_dir.mkdir(parents=True, exist_ok=True)
+
+        def sub_progress(curr: int, tot: int, msg: str) -> None:
+            if progress_callback:
+                progress_callback(
+                    processed_count + curr,
+                    total_files,
+                    f"[{f_idx}/{total_folders}] {rel_str} ➔ {msg}",
+                )
+
+        logger.info("Memproses subfolder [%d/%d]: %s (%d PDF)", f_idx, total_folders, rel_str, len(pdf_paths))
+
+        sub_res = process_bulk_files(
+            pdf_paths=pdf_paths,
+            db_path=db_path,
+            out_dir=sub_target_dir.parent,
+            pages_per_cert=pages_per_cert,
+            use_ai=use_ai,
+            gemini_api_key=gemini_api_key,
+            gemini_model=gemini_model,
+            use_ocr=use_ocr,
+            progress_callback=sub_progress,
+            run_name=sub_target_dir.name,
+            komparasi_path=komparasi_path,
+            mso_path=mso_path,
+        )
+
+        folder_results[rel_str] = sub_res
+        total_accepted += sub_res.accepted_count
+        total_review += sub_res.review_count
+        for item in sub_res.items:
+            master_items.append((rel_str, item))
+        for l_item in sub_res.lampiran_items:
+            master_lampiran_items.append((rel_str, l_item))
+
+        processed_count += len(pdf_paths)
+        gc.collect()
+
+    # Generate master consolidated workbook for certificates
+    master_excel = _write_master_tree_workbook(target_run_dir, master_items, template_path=mso_path)
+
+    # Generate master consolidated workbook for lampiran if any exist
+    master_lampiran_excel = None
+    if master_lampiran_items:
+        master_lampiran_excel = _write_master_lampiran_workbook(target_run_dir, master_lampiran_items)
+
+    return MultiFolderResult(
+        run_dir=target_run_dir,
+        total_folders=total_folders,
+        total_files=total_files,
+        accepted_count=total_accepted,
+        review_count=total_review,
+        folder_results=folder_results,
+        master_excel_path=master_excel,
+        master_lampiran_excel_path=master_lampiran_excel,
+    )
+
+
+def parse_formatted_certificate_name(stem: str) -> dict[str, Any]:
+    """Parse a pre-formatted certificate filename into metadata components and resolve Resource Code."""
+    s = stem.strip()
+    s = re.sub(r"^\[(?:REVIEW|LAMPIRAN)\]_", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"^(?:Lampiran)_", "", s, flags=re.IGNORECASE)
+
+    m_pref = re.match(r"^(SKP|LISENSI|SERTIFIKAT|SERTIF)\s*[-_]\s*(.+)$", s, re.IGNORECASE)
+    if m_pref:
+        pref = m_pref.group(1).upper()
+        name_part = m_pref.group(2).strip()
+        is_skp = pref == "SKP"
+        title = "SKP Ketenagalistrikan" if is_skp else f"Lisensi / Sertifikat ({pref})"
+        rc_info = lookup_resource_code(title=name_part, level="SKP" if is_skp else None, raw_text=s)
+        return {
+            "nid": "-",
+            "nama": clean_field(name_part),
+            "is_skp": is_skp,
+            "level": "SKP" if is_skp else "-",
+            "peran": "-",
+            "judul": title,
+            "tahun": "-",
+            "resource_code": rc_info.get("code", ""),
+            "institute_code": rc_info.get("institute", "D001" if pref == "LISENSI" else "D002"),
+        }
+
+    tokens = [t.strip() for t in s.split("_") if t.strip()]
+
+    # Case 1: First token is NID (pure digits or digits with 2-3 letters suffix like 9016033PL, 8310238RB)
+    if tokens and re.match(r"^(\d{6,10}[A-Za-z]{0,3}|\d{6,12})$", tokens[0]):
+        nid = tokens[0]
+
+        # Sub-case: Format NID_KodeSertifikat_Level_Tahun (e.g. 8310238RB_A100_Level 4_2026 or 8310238RB_A100_4_2026)
+        if len(tokens) >= 3 and re.match(r"^[A-Za-z][A-Za-z0-9]{2,4}$", tokens[1]) and not any(k in tokens[1].upper() for k in ["PELAKSANA", "ANALIS", "AHLI"]):
+            candidate_code = tokens[1].upper()
+            lvl_candidate = resolve_skp_level(tokens[2])
+            is_skp = lvl_candidate in GLOBAL_SKP_LEVEL_TITLES.values() or get_numeric_level(tokens[2]) is not None
+            tahun = tokens[3] if len(tokens) > 3 and re.match(r"^(?:19|20)\d{2}$", tokens[3]) else "-"
+            rc_info = lookup_resource_code(title=tokens[1], level=lvl_candidate, raw_text=s)
+            res_code = candidate_code if rc_info.get("code") == candidate_code or len(candidate_code) == 4 else (rc_info.get("code") or candidate_code)
+            return {
+                "nid": nid,
+                "nama": "-",  # Populated from database cross-reference
+                "is_skp": is_skp,
+                "level": lvl_candidate if is_skp else tokens[2],
+                "peran": rc_info.get("description", candidate_code),
+                "judul": rc_info.get("description", candidate_code),
+                "tahun": tahun,
+                "resource_code": res_code,
+                "institute_code": rc_info.get("institute", "D002"),
+            }
+
+        nama = tokens[1] if len(tokens) > 1 else ""
+
+        if len(tokens) >= 4:
+            lvl_candidate = resolve_skp_level(tokens[2])
+            is_recognized_lvl = lvl_candidate in GLOBAL_SKP_LEVEL_TITLES.values() or any(
+                k in tokens[2].upper() for k in ["ANALIS", "PELAKSANA", "AHLI", "UTAMA", "MADYA", "MUDA"]
+            )
+            if is_recognized_lvl:
+                peran_part = "_".join(tokens[3:])
+                rc_info = lookup_resource_code(title=peran_part, level=lvl_candidate, raw_text=s)
+                return {
+                    "nid": nid,
+                    "nama": nama,
+                    "is_skp": True,
+                    "level": lvl_candidate,
+                    "peran": clean_skp_peran(peran_part),
+                    "judul": clean_skp_peran(peran_part) or lvl_candidate,
+                    "tahun": tokens[-1] if re.match(r"^(?:19|20)\d{2}$", tokens[-1]) else "-",
+                    "resource_code": rc_info.get("code", ""),
+                    "institute_code": rc_info.get("institute", "D002"),
+                }
+            else:
+                last_is_year = bool(re.match(r"^(?:19|20)\d{2}$", tokens[-1]))
+                judul_tokens = tokens[2:-1] if last_is_year else tokens[2:]
+                judul_str = "_".join(judul_tokens) or "Sertifikat"
+                rc_info = lookup_resource_code(title=judul_str, raw_text=s)
+                return {
+                    "nid": nid,
+                    "nama": nama,
+                    "is_skp": False,
+                    "level": "-",
+                    "peran": "-",
+                    "judul": judul_str,
+                    "tahun": tokens[-1] if last_is_year else "-",
+                    "resource_code": rc_info.get("code", ""),
+                    "institute_code": rc_info.get("institute", "D002"),
+                }
+        elif len(tokens) == 3:
+            lvl_candidate = resolve_skp_level(tokens[2])
+            if lvl_candidate in GLOBAL_SKP_LEVEL_TITLES.values():
+                rc_info = lookup_resource_code(title=lvl_candidate, level=lvl_candidate, raw_text=s)
+                return {
+                    "nid": nid,
+                    "nama": nama,
+                    "is_skp": True,
+                    "level": lvl_candidate,
+                    "peran": lvl_candidate,
+                    "judul": lvl_candidate,
+                    "tahun": "-",
+                    "resource_code": rc_info.get("code", ""),
+                    "institute_code": rc_info.get("institute", "D002"),
+                }
+            last_is_year = bool(re.match(r"^(?:19|20)\d{2}$", tokens[2]))
+            judul_str = tokens[2] if not last_is_year else "Sertifikat"
+            rc_info = lookup_resource_code(title=judul_str, raw_text=s)
+            return {
+                "nid": nid,
+                "nama": nama,
+                "is_skp": False,
+                "level": "-",
+                "peran": "-",
+                "judul": judul_str,
+                "tahun": tokens[2] if last_is_year else "-",
+                "resource_code": rc_info.get("code", ""),
+                "institute_code": rc_info.get("institute", "D002"),
+            }
+        elif len(tokens) == 2:
+            rc_info = lookup_resource_code(title=tokens[1], raw_text=s)
+            return {
+                "nid": nid,
+                "nama": nama,
+                "is_skp": False,
+                "level": "-",
+                "peran": "-",
+                "judul": "Sertifikat",
+                "tahun": "-",
+                "resource_code": rc_info.get("code", ""),
+                "institute_code": rc_info.get("institute", "D002"),
+            }
+
+    # Case 2: No NID prefix, check if name tokens or title
+    if len(tokens) >= 2:
+        judul_str = "_".join(tokens[1:])
+        rc_info = lookup_resource_code(title=judul_str, raw_text=s)
+        return {
+            "nid": "-",
+            "nama": tokens[0],
+            "is_skp": False,
+            "level": "-",
+            "peran": "-",
+            "judul": judul_str,
+            "tahun": tokens[-1] if re.match(r"^(?:19|20)\d{2}$", tokens[-1]) else "-",
+            "resource_code": rc_info.get("code", ""),
+            "institute_code": rc_info.get("institute", "D002"),
+        }
+
+    rc_info = lookup_resource_code(title=clean_field(s), raw_text=s)
+    return {
+        "nid": "-",
+        "nama": clean_field(s),
+        "is_skp": False,
+        "level": "-",
+        "peran": "-",
+        "judul": "Sertifikat",
+        "tahun": "-",
+        "resource_code": rc_info.get("code", ""),
+        "institute_code": rc_info.get("institute", "D002"),
+    }
+
+
+def process_preformatted_ftp_folder(
+    root_dir: Path,
+    db_path: Path | None = None,
+    out_dir: Path | None = None,
+    progress_callback: Callable[[int, int, str], None] | None = None,
+    komparasi_path: Path | None = None,
+    mso_path: Path | None = None,
+) -> dict[str, Any]:
+    """Scan pre-formatted PDFs (e.g. from official PLN FTP) and generate per-subfolder and master Excel workbooks.
+    
+    Parses filenames directly into NID, Nama, SKP Level, Peran/Judul tanpa slow OCR,
+    cross-references with database.xlsx if present, and creates data.xlsx in every subfolder
+    plus rekap_seluruh_sertifikat.xlsx in the root.
+    """
+    if komparasi_path and Path(komparasi_path).exists():
+        get_resource_code_catalog(komparasi_path)
+    optimize_process_priority()
+    root = Path(root_dir).resolve()
+    pdf_folders = find_all_pdf_folders(root)
+    if not pdf_folders:
+        raise ValueError(f"Tidak ditemukan file PDF di folder:\n{root}")
+
+    total_files = sum(len(pdfs) for _, pdfs in pdf_folders)
+    total_folders = len(pdf_folders)
+
+    # Optional employee database lookup
+    emp_by_nid: dict[str, Employee] = {}
+    emp_by_name: dict[str, Employee] = {}
+    if db_path and Path(db_path).exists():
+        try:
+            cfg = load_config(None)
+            employees = load_employees(Path(db_path), cfg)
+            for e in employees:
+                if e.nid:
+                    emp_by_nid[clean_field(e.nid)] = e
+                if e.nama:
+                    emp_by_name[fold(e.nama).lower()] = e
+        except Exception as exc:
+            logger.warning("Could not load database for FTP cross-reference: %s", exc)
+
+    master_rows: list[dict[str, Any]] = []
+    master_lampiran_rows: list[dict[str, Any]] = []
+    folder_summaries: dict[str, int] = {}
+    processed_count = 0
+
+    for f_idx, (folder_path, pdf_paths) in enumerate(pdf_folders, 1):
+        try:
+            rel_path = folder_path.relative_to(root)
+        except ValueError:
+            rel_path = Path(folder_path.name)
+
+        rel_str = str(rel_path).replace("\\", "/")
+        if rel_str == ".":
+            rel_str = root.name
+
+        folder_items: list[dict[str, Any]] = []
+        folder_lampiran_items: list[dict[str, Any]] = []
+
+        for p_idx, pdf_path in enumerate(pdf_paths, 1):
+            processed_count += 1
+            if progress_callback:
+                progress_callback(
+                    processed_count,
+                    total_files,
+                    f"Merekap [{processed_count}/{total_files}]: {pdf_path.name}",
+                )
+
+            # Check if non-certificate lampiran document
+            if pdf_path.name.upper().startswith("[LAMPIRAN]") or is_roster_doc(pdf_path):
+                file_size_kb = round(pdf_path.stat().st_size / 1024, 1)
+                l_row = {
+                    "subfolder": rel_str,
+                    "file_name": pdf_path.name,
+                    "src_name": pdf_path.name,
+                    "kategori": "Lampiran Dokumen",
+                    "keterangan": "Dokumen pendukung / lampiran",
+                    "size_kb": f"{file_size_kb} KB",
+                }
+                folder_lampiran_items.append(l_row)
+                master_lampiran_rows.append(l_row)
+                continue
+
+            parsed = parse_formatted_certificate_name(pdf_path.stem)
+            nid_val = parsed["nid"]
+            nama_val = parsed["nama"]
+            jabatan_val = "-"
+            unit_val = "-"
+
+            # Cross-reference with database
+            matched_emp = None
+            if nid_val != "-" and nid_val in emp_by_nid:
+                matched_emp = emp_by_nid[nid_val]
+            elif nama_val and fold(nama_val).lower() in emp_by_name:
+                matched_emp = emp_by_name[fold(nama_val).lower()]
+
+            if matched_emp:
+                nid_val = matched_emp.nid or nid_val
+                nama_val = matched_emp.nama or nama_val
+                jabatan_val = matched_emp.jabatan or "-"
+                unit_val = matched_emp.unit or "-"
+
+            # Fast digital metadata extraction (PyMuPDF without OCR)
+            doc_num = "-"
+            iss_date = "-"
+            exp_date = "-"
+            try:
+                doc = pymupdf.open(pdf_path)
+                if len(doc) > 0:
+                    txt = "\n".join(doc[i].get_text() for i in range(min(len(doc), 3)))
+                    if txt:
+                        is_k3_cert = (
+                            "k3" in txt.lower()
+                            or "kemnaker" in txt.lower()
+                            or "keselamatan" in txt.lower()
+                            or "kesehatan kerja" in txt.lower()
+                        )
+                        s_iss, s_exp = smart_extract_dates(txt, is_k3=is_k3_cert)
+                        if s_iss:
+                            iss_date = s_iss.isoformat()
+                        if s_exp:
+                            exp_date = s_exp.isoformat()
+                doc.close()
+            except Exception:
+                pass
+
+            file_size_kb = round(pdf_path.stat().st_size / 1024, 1)
+
+            # Refine Resource Code with employee jabatan if available
+            rc_val = parsed.get("resource_code", "")
+            inst_val = parsed.get("institute_code", "D002")
+            if not rc_val or rc_val == "-":
+                rc_info = lookup_resource_code(
+                    title=parsed.get("peran") or parsed.get("judul", ""),
+                    level=parsed.get("level"),
+                    jabatan=jabatan_val if jabatan_val != "-" else "",
+                    raw_text=pdf_path.stem,
+                )
+                rc_val = rc_info.get("code", "")
+                inst_val = rc_info.get("institute", "D002")
+
+            row = {
+                "subfolder": rel_str,
+                "file_name": pdf_path.name,
+                "nid": nid_val,
+                "nama": nama_val,
+                "jabatan": jabatan_val,
+                "unit": unit_val,
+                "is_skp": parsed["is_skp"],
+                "tipe_dokumen": "SKP Ketenagalistrikan" if parsed["is_skp"] else "Sertifikat Standar",
+                "level": parsed["level"],
+                "peran": parsed["peran"],
+                "resource_code": rc_val,
+                "institute_code": inst_val,
+                "judul": parsed["judul"],
+                "nomor": doc_num,
+                "issue_date": iss_date,
+                "expiry_date": exp_date,
+                "size_kb": f"{file_size_kb} KB",
+                "full_path": str(pdf_path),
+            }
+            folder_items.append(row)
+            master_rows.append(row)
+
+        folder_summaries[rel_str] = len(folder_items)
+
+        # Write data.xlsx inside this subfolder (or inside out_dir / rel_path)
+        sub_dest_folder = (Path(out_dir).resolve() / rel_path) if out_dir else folder_path
+        sub_dest_folder.mkdir(parents=True, exist_ok=True)
+        _write_ftp_subfolder_workbook(sub_dest_folder, folder_items, rel_str, template_path=mso_path)
+        if folder_lampiran_items:
+            _write_ftp_lampiran_workbook(sub_dest_folder, folder_lampiran_items)
+        gc.collect()
+
+    # Write Master rekap_seluruh_sertifikat.xlsx
+    master_dest_folder = Path(out_dir).resolve() if out_dir else root
+    master_dest_folder.mkdir(parents=True, exist_ok=True)
+    master_file = _write_ftp_master_workbook(master_dest_folder, master_rows, root.name, template_path=mso_path)
+    if master_lampiran_rows:
+        _write_ftp_master_lampiran_workbook(master_dest_folder, master_lampiran_rows)
+
+    return {
+        "status": "success",
+        "root_dir": str(root),
+        "total_folders": total_folders,
+        "total_files": total_files,
+        "folder_summaries": folder_summaries,
+        "master_excel": str(master_file),
+    }
+
+
+def _write_ftp_lampiran_workbook(folder_dir: Path, items: list[dict[str, Any]]) -> Path:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Rekap Lampiran Dokumen"
+    headers = ["No", "Nama File Lampiran", "File Asal", "Kategori Dokumen", "Keterangan", "Ukuran Berkas"]
+    header_font = Font(name="Segoe UI", size=10, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="334155", end_color="334155", fill_type="solid")
+    border_thin = Border(
+        left=Side(style="thin", color="CBD5E1"),
+        right=Side(style="thin", color="CBD5E1"),
+        top=Side(style="thin", color="CBD5E1"),
+        bottom=Side(style="thin", color="CBD5E1"),
+    )
+    align_center = Alignment(horizontal="center", vertical="center")
+    align_left = Alignment(horizontal="left", vertical="center")
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = align_center
+        cell.border = border_thin
+
+    row_fill_even = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+    row_fill_odd = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+    for r_idx, it in enumerate(items, 2):
+        fill = row_fill_even if r_idx % 2 == 0 else row_fill_odd
+        vals = [r_idx - 1, it["file_name"], it["src_name"], it["kategori"], it["keterangan"], it["size_kb"]]
+        for col_idx, v in enumerate(vals, 1):
+            c = ws.cell(row=r_idx, column=col_idx, value=str(v))
+            c.font = Font(name="Segoe UI", size=9)
+            c.fill = fill
+            c.border = border_thin
+            if col_idx in [1, 6]:
+                c.alignment = align_center
+            else:
+                c.alignment = align_left
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = min(max(max_len + 3, 12), 50)
+    ws.row_dimensions[1].height = 26
+    out_f = folder_dir / "rekap_lampiran_dokumen.xlsx"
+    wb.save(out_f)
+    wb.close()
+    return out_f
+
+
+def _write_ftp_master_lampiran_workbook(root_dest: Path, items: list[dict[str, Any]]) -> Path:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Rekap Seluruh Lampiran"
+    headers = ["No", "Subfolder", "Nama File Lampiran", "File Asal", "Kategori Dokumen", "Keterangan", "Ukuran Berkas"]
+    header_font = Font(name="Segoe UI", size=10, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="334155", end_color="334155", fill_type="solid")
+    border_thin = Border(
+        left=Side(style="thin", color="CBD5E1"),
+        right=Side(style="thin", color="CBD5E1"),
+        top=Side(style="thin", color="CBD5E1"),
+        bottom=Side(style="thin", color="CBD5E1"),
+    )
+    align_center = Alignment(horizontal="center", vertical="center")
+    align_left = Alignment(horizontal="left", vertical="center")
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = align_center
+        cell.border = border_thin
+
+    row_fill_even = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+    row_fill_odd = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+    for r_idx, it in enumerate(items, 2):
+        fill = row_fill_even if r_idx % 2 == 0 else row_fill_odd
+        vals = [r_idx - 1, it["subfolder"], it["file_name"], it["src_name"], it["kategori"], it["keterangan"], it["size_kb"]]
+        for col_idx, v in enumerate(vals, 1):
+            c = ws.cell(row=r_idx, column=col_idx, value=str(v))
+            c.font = Font(name="Segoe UI", size=9)
+            c.fill = fill
+            c.border = border_thin
+            if col_idx in [1, 7]:
+                c.alignment = align_center
+            else:
+                c.alignment = align_left
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = min(max(max_len + 3, 12), 50)
+    ws.row_dimensions[1].height = 26
+    out_f = root_dest / "rekap_seluruh_lampiran.xlsx"
+    wb.save(out_f)
+    wb.close()
+    return out_f
+
+
+def _write_ftp_subfolder_workbook(
+    folder_dir: Path,
+    items: list[dict[str, Any]],
+    title: str,
+    template_path: Path | None = None,
+) -> Path:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Rekap Sertifikat"
+
+    headers = [
+        "No", "Nama File PDF", "NID", "Nama Pegawai", "Jabatan", "Unit Kerja",
+        "Tipe Dokumen", "Level SKP", "Peran / Bidang", "Resource Code", "Judul Sertifikat",
+        "Tanggal Terbit", "Tanggal Expired", "Ukuran Berkas",
+    ]
+    header_font = Font(name="Segoe UI", size=10, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1E40AF", end_color="1E40AF", fill_type="solid")
+    border_thin = Border(
+        left=Side(style="thin", color="CBD5E1"),
+        right=Side(style="thin", color="CBD5E1"),
+        top=Side(style="thin", color="CBD5E1"),
+        bottom=Side(style="thin", color="CBD5E1"),
+    )
+    align_center = Alignment(horizontal="center", vertical="center")
+    align_left = Alignment(horizontal="left", vertical="center")
+
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = align_center
+        cell.border = border_thin
+
+    row_fill_even = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+    row_fill_odd = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+
+    for r_idx, it in enumerate(items, 2):
+        fill = row_fill_even if r_idx % 2 == 0 else row_fill_odd
+        vals = [
+            r_idx - 1,
+            it["file_name"],
+            it["nid"],
+            it["nama"],
+            it["jabatan"],
+            it["unit"],
+            it["tipe_dokumen"],
+            it["level"],
+            it["peran"],
+            it.get("resource_code", ""),
+            it["judul"],
+            it["issue_date"],
+            it["expiry_date"],
+            it["size_kb"],
+        ]
+        for col_idx, v in enumerate(vals, 1):
+            c = ws.cell(row=r_idx, column=col_idx, value=str(v))
+            c.font = Font(name="Segoe UI", size=9)
+            c.fill = fill
+            c.border = border_thin
+            if col_idx in [1, 3, 10, 12, 13, 14]:
+                c.alignment = align_center
+            else:
+                c.alignment = align_left
+
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = min(max(max_len + 3, 11), 45)
+
+    ws.row_dimensions[1].height = 26
+    out_file = folder_dir / "data.xlsx"
+    wb.save(out_file)
+    wb.close()
+
+    # Generate subfolder For NPS 0726.xlsx
+    try:
+        mso_items = []
+        for it in items:
+            mso_items.append({
+                "nid": it.get("nid", ""),
+                "nama": it.get("nama", ""),
+                "level": it.get("level", ""),
+                "is_skp": it.get("is_skp", False),
+                "judul": it.get("judul", ""),
+                "peran": it.get("peran", ""),
+                "resource_code": it.get("resource_code", ""),
+                "institute_code": it.get("institute_code", "D002"),
+                "effective_date": it.get("issue_date", ""),
+                "exp_date": it.get("expiry_date", ""),
+                "subfolder_name": title,
+                "file_name": it.get("file_name", ""),
+            })
+        if any(x.get("is_skp") or x.get("level") or (x.get("resource_code") and str(x.get("resource_code")).strip() not in ["-", ""]) for x in mso_items):
+            build_for_nps_workbook(mso_items, folder_dir / "For NPS 0726.xlsx", template_path=template_path)
+    except Exception as exc:
+        logger.warning("Could not generate subfolder For NPS 0726.xlsx: %s", exc)
+
+    return out_file
+
+
+def _write_ftp_master_workbook(
+    root_dest: Path,
+    items: list[dict[str, Any]],
+    root_name: str,
+    template_path: Path | None = None,
+) -> Path:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Rekap Seluruh Sertifikat"
+
+    headers = [
+        "No", "Subfolder / Kategori", "Nama File PDF", "NID", "Nama Pegawai", "Jabatan", "Unit Kerja",
+        "Tipe Dokumen", "Level SKP", "Peran / Bidang", "Resource Code", "Judul Sertifikat",
+        "Tanggal Terbit", "Tanggal Expired", "Ukuran Berkas", "Path Lengkap",
+    ]
+    header_font = Font(name="Segoe UI", size=10, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1E40AF", end_color="1E40AF", fill_type="solid")
+    border_thin = Border(
+        left=Side(style="thin", color="CBD5E1"),
+        right=Side(style="thin", color="CBD5E1"),
+        top=Side(style="thin", color="CBD5E1"),
+        bottom=Side(style="thin", color="CBD5E1"),
+    )
+    align_center = Alignment(horizontal="center", vertical="center")
+    align_left = Alignment(horizontal="left", vertical="center")
+
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = align_center
+        cell.border = border_thin
+
+    row_fill_even = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+    row_fill_odd = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+
+    for r_idx, it in enumerate(items, 2):
+        fill = row_fill_even if r_idx % 2 == 0 else row_fill_odd
+        vals = [
+            r_idx - 1,
+            it["subfolder"],
+            it["file_name"],
+            it["nid"],
+            it["nama"],
+            it["jabatan"],
+            it["unit"],
+            it["tipe_dokumen"],
+            it["level"],
+            it["peran"],
+            it.get("resource_code", ""),
+            it["judul"],
+            it["issue_date"],
+            it["expiry_date"],
+            it["size_kb"],
+            it["full_path"],
+        ]
+        for col_idx, v in enumerate(vals, 1):
+            c = ws.cell(row=r_idx, column=col_idx, value=str(v))
+            c.font = Font(name="Segoe UI", size=9)
+            c.fill = fill
+            c.border = border_thin
+            if col_idx in [1, 4, 11, 13, 14, 15]:
+                c.alignment = align_center
+            else:
+                c.alignment = align_left
+
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = min(max(max_len + 3, 11), 45)
+
+    ws.row_dimensions[1].height = 26
+    out_file = root_dest / "rekap_seluruh_sertifikat.xlsx"
+    wb.save(out_file)
+    wb.save(root_dest / "data.xlsx")
+    wb.close()
+
+    # Generate master For NPS 0726.xlsx
+    try:
+        mso_items = []
+        for it in items:
+            mso_items.append({
+                "nid": it.get("nid", ""),
+                "nama": it.get("nama", ""),
+                "level": it.get("level", ""),
+                "is_skp": it.get("is_skp", False),
+                "judul": it.get("judul", ""),
+                "peran": it.get("peran", ""),
+                "resource_code": it.get("resource_code", ""),
+                "institute_code": it.get("institute_code", "D002"),
+                "effective_date": it.get("issue_date", ""),
+                "exp_date": it.get("expiry_date", ""),
+                "subfolder_name": it.get("subfolder", root_name),
+                "file_name": it.get("file_name", ""),
+            })
+        if any(x.get("is_skp") or x.get("level") or (x.get("resource_code") and str(x.get("resource_code")).strip() not in ["-", ""]) for x in mso_items):
+            build_for_nps_workbook(mso_items, root_dest / "For NPS 0726.xlsx", template_path=template_path)
+    except Exception as exc:
+        logger.warning("Could not generate master For NPS 0726.xlsx: %s", exc)
+
+    return out_file

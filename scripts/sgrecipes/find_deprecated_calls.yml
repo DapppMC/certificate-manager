@@ -1,0 +1,13 @@
+# Gate -1 [DEAD_WEIGHT]/modernization candidates: deprecated Node.js APIs.
+# Run: ast-grep scan -r tools/sgrecipes/find_deprecated_calls.yml <dir>
+id: find-deprecated-calls
+language: TypeScript
+severity: warning
+message: "Deprecated API call; plan a replacement ticket"
+rule:
+  any:
+    - pattern: new Buffer($$$ARGS)
+    - pattern: fs.exists($$$ARGS)
+    - pattern: url.parse($$$ARGS)
+    - pattern: util.isArray($$$ARGS)
+    - pattern: require("request")

@@ -1,0 +1,689 @@
+{
+  "schema": "cartography/1",
+  "repo_root": "/home/dapp/Projects/cert_slicer",
+  "engine": "regex",
+  "entrypoints": [
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "build_installer.py",
+      "line": 118
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/ab_summary.py",
+      "line": 82
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/cartograph.py",
+      "line": 482
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/check_mutants.py",
+      "line": 311
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/check_pack.py",
+      "line": 1266
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/collect_evidence.py",
+      "line": 740
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/design_lint.py",
+      "line": 649
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/gate3/failure_signature.py",
+      "line": 13
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/gate3/reflect_check.py",
+      "line": 110
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/make_fixtures.py",
+      "line": 323
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/odcat.py",
+      "line": 258
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/planner4/core/antigravity_bridge.py",
+      "line": 403
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 744
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/planner4/core/fleet.py",
+      "line": 518
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/planner4/core/ui/cdp_linter.py",
+      "line": 196
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/planner4/core/verification/appsec_audit.py",
+      "line": 640
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/planner4/core/verification/mutation_gate.py",
+      "line": 636
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/planner4/core/verification/sealed_gate.py",
+      "line": 489
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/planner4/dag_planner.py",
+      "line": 505
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/planner4/orchestrator.py",
+      "line": 1099
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/planner4/swarm.py",
+      "line": 567
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/planner4/verifier.py",
+      "line": 751
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/repomap.py",
+      "line": 143
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/run_browser_tests.py",
+      "line": 122
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/run_check.py",
+      "line": 312
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/sandbox.py",
+      "line": 134
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/scan_secrets.py",
+      "line": 133
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/stage_tests.py",
+      "line": 70
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/ticketc.py",
+      "line": 234
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "scripts/ui_check.py",
+      "line": 144
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "spikes/ocr_spike.py",
+      "line": 88
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "src/certslice/__main__.py",
+      "line": 1
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "src/certslice/gui.py",
+      "line": 1831
+    },
+    {
+      "type": "http_route",
+      "method": "GET",
+      "route": "/api/status",
+      "handler": "get_status",
+      "path": "src/certslice/web.py",
+      "line": 53
+    },
+    {
+      "type": "http_route",
+      "method": "GET",
+      "route": "/api/settings",
+      "handler": "get_settings",
+      "path": "src/certslice/web.py",
+      "line": 71
+    },
+    {
+      "type": "http_route",
+      "method": "POST",
+      "route": "/api/settings",
+      "handler": "save_settings",
+      "path": "src/certslice/web.py",
+      "line": 84
+    },
+    {
+      "type": "http_route",
+      "method": "POST",
+      "route": "/api/process",
+      "handler": "start_process",
+      "path": "src/certslice/web.py",
+      "line": 145
+    },
+    {
+      "type": "http_route",
+      "method": "GET",
+      "route": "/api/progress/{job_id}",
+      "handler": "get_progress_stream",
+      "path": "src/certslice/web.py",
+      "line": 239
+    },
+    {
+      "type": "http_route",
+      "method": "GET",
+      "route": "/api/jobs/{job_id}/results",
+      "handler": "get_job_results",
+      "path": "src/certslice/web.py",
+      "line": 276
+    },
+    {
+      "type": "http_route",
+      "method": "GET",
+      "route": "/api/jobs/{job_id}/preview/{item_index}",
+      "handler": "get_item_preview",
+      "path": "src/certslice/web.py",
+      "line": 331
+    },
+    {
+      "type": "http_route",
+      "method": "POST",
+      "route": "/api/jobs/{job_id}/approve",
+      "handler": "approve_candidate",
+      "path": "src/certslice/web.py",
+      "line": 363
+    },
+    {
+      "type": "http_route",
+      "method": "GET",
+      "route": "/api/jobs/{job_id}/download/zip",
+      "handler": "download_zip",
+      "path": "src/certslice/web.py",
+      "line": 444
+    },
+    {
+      "type": "http_route",
+      "method": "GET",
+      "route": "/api/jobs/{job_id}/download/{filename}",
+      "handler": "download_workbook",
+      "path": "src/certslice/web.py",
+      "line": 475
+    },
+    {
+      "type": "http_route",
+      "method": "POST",
+      "route": "/api/open-folder",
+      "handler": "open_folder",
+      "path": "src/certslice/web.py",
+      "line": 490
+    },
+    {
+      "type": "http_route",
+      "method": "GET",
+      "route": "/",
+      "handler": "index_page",
+      "path": "src/certslice/web.py",
+      "line": 504
+    },
+    {
+      "type": "cli",
+      "handler": "__main__",
+      "path": "src/certslice/web.py",
+      "line": 1491
+    }
+  ],
+  "top_dependencies": [
+    {
+      "symbol": "read_text",
+      "file": "scripts/collect_evidence.py",
+      "pagerank_score": 0.0833,
+      "referenced_by": 6
+    },
+    {
+      "symbol": "matches",
+      "file": "scripts/collect_evidence.py",
+      "pagerank_score": 0.0833,
+      "referenced_by": 2
+    },
+    {
+      "symbol": "section",
+      "file": "scripts/collect_evidence.py",
+      "pagerank_score": 0.0833,
+      "referenced_by": 1
+    },
+    {
+      "symbol": "text",
+      "file": "scripts/run_check.py",
+      "pagerank_score": 0.0446,
+      "referenced_by": 17
+    },
+    {
+      "symbol": "guard",
+      "file": "scripts/run_check.py",
+      "pagerank_score": 0.0446,
+      "referenced_by": 2
+    },
+    {
+      "symbol": "parse_args",
+      "file": "spikes/ocr_spike.py",
+      "pagerank_score": 0.0304,
+      "referenced_by": 10
+    },
+    {
+      "symbol": "load_config",
+      "file": "src/certslice/config.py",
+      "pagerank_score": 0.0259,
+      "referenced_by": 4
+    },
+    {
+      "symbol": "fold_text",
+      "file": "src/certslice/config.py",
+      "pagerank_score": 0.0259,
+      "referenced_by": 2
+    },
+    {
+      "symbol": "load_aliases",
+      "file": "src/certslice/config.py",
+      "pagerank_score": 0.0259,
+      "referenced_by": 1
+    },
+    {
+      "symbol": "InputError",
+      "file": "src/certslice/errors.py",
+      "pagerank_score": 0.0239,
+      "referenced_by": 7
+    },
+    {
+      "symbol": "AccountingError",
+      "file": "src/certslice/errors.py",
+      "pagerank_score": 0.0239,
+      "referenced_by": 3
+    },
+    {
+      "symbol": "errors",
+      "file": "scripts/check_pack.py",
+      "pagerank_score": 0.0234,
+      "referenced_by": 17
+    },
+    {
+      "symbol": "status",
+      "file": "scripts/check_pack.py",
+      "pagerank_score": 0.0234,
+      "referenced_by": 7
+    },
+    {
+      "symbol": "tickets",
+      "file": "scripts/check_pack.py",
+      "pagerank_score": 0.0234,
+      "referenced_by": 4
+    },
+    {
+      "symbol": "files",
+      "file": "scripts/scan_secrets.py",
+      "pagerank_score": 0.0214,
+      "referenced_by": 12
+    }
+  ],
+  "orphan_files": [],
+  "orphan_notes": {},
+  "db_schema": {
+    "tables": [
+      "cursors",
+      "events",
+      "leases",
+      "meta",
+      "tickets"
+    ]
+  },
+  "env_contract": [
+    "CHROME_BIN",
+    "MKL_NUM_THREADS",
+    "NODE_PATH",
+    "NUMEXPR_NUM_THREADS",
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "OPEN_DESIGN_DIR",
+    "PLANNER_BOARD_ALLOW_BUGGY_WAL",
+    "PLANNER_BOARD_ALLOW_UNSAFE_WAL",
+    "PLANNER_BOARD_JOURNAL",
+    "PLANNER_CHROMIUM_PATH",
+    "PLANNER_DENY_HOSTS",
+    "PLANNER_EXECUTOR",
+    "PLANNER_EXECUTOR_CMD",
+    "PLANNER_LEGACY_SWARM",
+    "PLANNER_NODE",
+    "PLANNER_PLAYWRIGHT_PATH",
+    "PLANNER_REPORT_DIR",
+    "PLANNER_ROOT",
+    "PLANNER_SEALED_ROOT",
+    "PYTEST_XDIST_WORKER",
+    "RUN_CHECK_TICKET",
+    "TRACE_BUDGET",
+    "TRACE_FRAMES",
+    "TRACE_ROOT",
+    "TRACE_SLICE_OUT",
+    "VECLIB_MAXIMUM_THREADS",
+    "WSL_DISTRO_NAME",
+    "WSL_INTEROP"
+  ],
+  "sql_calls": [
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 59,
+      "sql": "CREATE TABLE IF NOT EXISTS meta( key TEXT PRIMARY KEY, value TEXT ); CREATE TABLE IF NOT EXISTS events( id INTEGER PRIMA"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 298,
+      "sql": "ALTER TABLE leases ADD COLUMN fence INTEGER NOT NULL DEFAULT 0"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 300,
+      "sql": "ALTER TABLE leases ADD COLUMN acquired REAL NOT NULL DEFAULT 0"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 301,
+      "sql": "INSERT OR IGNORE INTO meta(key, value) VALUES('fence', '0')"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 391,
+      "sql": "UPDATE meta SET value = CAST(value AS INTEGER) + 1 WHERE key = 'fence'"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 392,
+      "sql": "SELECT value FROM meta WHERE key = 'fence'"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 427,
+      "sql": "DELETE FROM leases WHERE expires + ? < ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 428,
+      "sql": "SELECT path, worker, ticket, expires, fence FROM leases"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 445,
+      "sql": "UPDATE leases SET expires = ? WHERE path = ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 451,
+      "sql": "INSERT INTO leases(path, worker, ticket, expires, fence, acquired) VALUES(?,?,?,?,?,?)"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 464,
+      "sql": "UPDATE leases SET expires = ? WHERE worker = ? AND expires + ? >= ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 476,
+      "sql": "DELETE FROM leases WHERE worker = ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 487,
+      "sql": "DELETE FROM leases WHERE worker = ? AND path = ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 494,
+      "sql": "SELECT 1 FROM leases WHERE worker = ? LIMIT 1"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 495,
+      "sql": "DELETE FROM leases WHERE worker = ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 498,
+      "sql": "DELETE FROM leases WHERE path = ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 500,
+      "sql": "INSERT INTO events(ts, worker, ticket, kind, ref, sha, summary) VALUES(?,?,?,?,?,?,?)"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 509,
+      "sql": "SELECT path, worker, ticket, expires, fence FROM leases WHERE expires + ? < ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 512,
+      "sql": "DELETE FROM leases WHERE path = ? AND fence = ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 513,
+      "sql": "INSERT INTO events(ts, worker, ticket, kind, ref, sha, summary) VALUES(?,?,?,?,?,?,?)"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 520,
+      "sql": "SELECT path, worker, ticket, expires, fence, acquired FROM leases"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 549,
+      "sql": "SELECT 1 FROM leases WHERE worker = ? AND fence = ? AND expires + ? >= ? LIMIT 1"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 565,
+      "sql": "INSERT INTO events(ts, worker, ticket, kind, ref, sha, summary) VALUES(?,?,?,?,?,?,?)"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 568,
+      "sql": "SELECT 1 FROM leases WHERE worker = ? AND fence = ? AND expires + ? >= ? LIMIT 1"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 572,
+      "sql": "INSERT INTO events(ts, worker, ticket, kind, ref, sha, summary) VALUES(?,?,?,?,?,?,?)"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 583,
+      "sql": "SELECT last_id FROM cursors WHERE worker = ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 586,
+      "sql": "SELECT COALESCE(MAX(id), 0) FROM events"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 587,
+      "sql": "INSERT INTO cursors(worker, last_id) VALUES(?, ?)"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 598,
+      "sql": "SELECT last_id FROM cursors WHERE worker = ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 600,
+      "sql": "SELECT id, ts, worker, ticket, kind, ref, sha, summary FROM events WHERE id > ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 614,
+      "sql": "SELECT COALESCE(MAX(id), 0) FROM events"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 617,
+      "sql": "INSERT INTO cursors(worker, last_id) VALUES(?, ?)"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 625,
+      "sql": "INSERT INTO cursors(worker, last_id) VALUES(?, ?)"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 627,
+      "sql": "SELECT last_id FROM cursors WHERE worker = ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 630,
+      "sql": "SELECT id, ts, worker, ticket, kind, ref, sha, summary FROM events WHERE ticket = ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 635,
+      "sql": "SELECT COALESCE(MAX(id), 0) FROM events"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 640,
+      "sql": "SELECT MIN(last_id) FROM cursors"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 642,
+      "sql": "SELECT COALESCE(MAX(id), 0) FROM events"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 646,
+      "sql": "DELETE FROM events WHERE id <= ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 659,
+      "sql": "SELECT state, attempts FROM tickets WHERE id = ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 662,
+      "sql": "INSERT INTO tickets(id, state, owner, epoch, sha, attempts, note, updated) VALUES(?,?,?,?,?,?,?,?)"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 672,
+      "sql": "UPDATE tickets SET state=?, owner=COALESCE(NULLIF(?, ''), owner), epoch=CASE WHEN ? > 0 THEN ? ELSE epoch END,"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 675,
+      "sql": "SELECT id, state, owner, epoch, sha, attempts, note, updated FROM tickets WHERE id = ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 679,
+      "sql": "SELECT id, state, owner, epoch, sha, attempts, note, updated FROM tickets WHERE id = ?"
+    },
+    {
+      "path": "scripts/planner4/core/coordination/blackboard.py",
+      "line": 684,
+      "sql": "SELECT id, state, owner, epoch, sha, attempts, note, updated FROM tickets"
+    }
+  ],
+  "deprecated_calls": [],
+  "dynamic_dispatch_files": [
+    "docs/spec/repo-root/tests/acceptance/test_pipeline.py",
+    "scripts/design_lint.py",
+    "scripts/planner4/core/coordination/blackboard.py",
+    "scripts/planner4/core/ui/cdp-kinematic-optical-linter.mjs",
+    "tests/acceptance/test_pipeline.py"
+  ],
+  "stats": {
+    "files_scanned": 144,
+    "source_files": 144,
+    "repomap_files": 101,
+    "repomap_tokens": 1488,
+    "entrypoint_scan_skipped_files": 71
+  },
+  "limits": [
+    "Structure only: behaviour is not inferred. Verify with golden tests (Gate -1).",
+    "Regex engine is line based; multi-line calls need --engine ast-grep.",
+    "Entry points and top_dependencies ignore these folders (--include-nonprod to scan them): __fixtures__, __mocks__, __tests__, doc, docs, e2e, example, examples, fixtures, sample, samples, test, tests.",
+    "top_dependencies skips generic names (get, set, add, save, ...), dunder methods and names under 4 characters."
+  ]
+}

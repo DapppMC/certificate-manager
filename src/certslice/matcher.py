@@ -1,10 +1,42 @@
+import functools
 import math
 import re
 
-from rapidfuzz import fuzz
+import numpy as np
+from rapidfuzz import fuzz, process
 
 from certslice.models import Candidate, Employee
 from certslice.normalize import fold, name_tokens
+
+
+class _EmployeeIndex:
+    __slots__ = ("norms", "emp_tokens", "by_k", "by_k_norms")
+
+    def __init__(self, norms: tuple[str, ...]):
+        self.norms = norms
+        self.emp_tokens: list[list[str]] = []
+        self.by_k: dict[int, list[int]] = {}
+        self.by_k_norms: dict[int, list[str]] = {}
+        for idx, norm in enumerate(norms):
+            toks = norm.split() if norm else []
+            self.emp_tokens.append(toks)
+            k = len(toks)
+            if k > 0:
+                self.by_k.setdefault(k, []).append(idx)
+                self.by_k_norms.setdefault(k, []).append(norm)
+
+
+@functools.lru_cache(maxsize=16)
+def _get_employee_index(norms: tuple[str, ...]) -> _EmployeeIndex:
+    return _EmployeeIndex(norms)
+
+
+@functools.lru_cache(maxsize=32)
+def _compile_cue_regex(cues: tuple[str, ...]) -> re.Pattern | None:
+    folded = [re.escape(fold(c)) for c in cues if fold(c)]
+    if not folded:
+        return None
+    return re.compile(r"(?<![a-z0-9])(?:" + "|".join(folded) + r")(?![a-z0-9])")
 
 
 def template_employees(per_page: list[list[Candidate]], n_pages: int, cfg: dict) -> set[int]:
@@ -22,16 +54,14 @@ def cue_filter(cands: list[Candidate], lines: list[str], cfg: dict) -> list[Cand
     m = cfg["matching"]
     accept_score = float(m["accept_score"])
     cue_window_lines = int(m.get("cue_window_lines", 3))
-    holder_cues = m.get("holder_cues", [])
+    holder_cues = tuple(m.get("holder_cues", []))
 
-    folded_lines = [fold(l) for l in lines]
+    cue_regex = _compile_cue_regex(holder_cues)
     cue_line_indices: list[int] = []
-    for idx, fl in enumerate(folded_lines):
-        for cue in holder_cues:
-            pattern = r"(?<![a-z0-9])" + re.escape(fold(cue)) + r"(?![a-z0-9])"
-            if re.search(pattern, fl):
+    if cue_regex is not None:
+        for idx, l in enumerate(lines):
+            if cue_regex.search(fold(l)):
                 cue_line_indices.append(idx)
-                break
 
     if not cue_line_indices:
         res = list(cands)
@@ -91,6 +121,9 @@ def decide(cands: list[Candidate], employees: list[Employee], cfg: dict):
 
 
 def page_candidates(lines: list[str], employees: list[Employee], cfg: dict) -> list[Candidate]:
+    if not lines or not employees:
+        return []
+
     m = cfg["matching"]
     accept_score = float(m["accept_score"])
     list_score = float(m["list_score"])
@@ -98,71 +131,125 @@ def page_candidates(lines: list[str], employees: list[Employee], cfg: dict) -> l
     min_tokens_fuzzy = int(m.get("min_tokens_fuzzy", 2))
     titles = frozenset(m.get("titles", []))
 
-    # Tokenize each line
+    # Tokenize each line once
     line_tokens: list[tuple[int, list[str]]] = []
+    page_token_set: set[str] = set()
     for line_idx, line in enumerate(lines):
         toks = name_tokens(line, titles)
         if toks:
             line_tokens.append((line_idx, toks))
+            page_token_set.update(toks)
+
+    if not line_tokens:
+        return []
+
+    index = _get_employee_index(tuple(e.norm for e in employees))
+    cutoff = max(0.0, min(list_score, accept_score, partial_score) - 1e-6)
 
     best_scores: dict[int, float] = {}
     best_lines: dict[int, int] = {}
     best_partials: dict[int, bool] = {}
 
-    for emp_idx, emp in enumerate(employees):
-        emp_norm = emp.norm
-        if not emp_norm:
-            continue
-        emp_toks = emp_norm.split()
-        k = len(emp_toks)
-        if k == 0:
-            continue
-
-        emp_best_score = -1.0
-        emp_best_line = -1
-        emp_best_partial = False
-
-        for line_idx, toks in line_tokens:
-            line_best = 0.0
-            is_partial = False
-            if k < min_tokens_fuzzy:
-                if emp_norm in toks:
-                    if len(toks) == 1:
-                        line_best = 100.0
+    for k, emp_indices in index.by_k.items():
+        if k < min_tokens_fuzzy:
+            for emp_idx in emp_indices:
+                emp_norm = index.norms[emp_idx]
+                if emp_norm not in page_token_set:
+                    continue
+                emp_best_score = -1.0
+                emp_best_line = -1
+                emp_best_partial = False
+                for line_idx, toks in line_tokens:
+                    if emp_norm in toks:
+                        if len(toks) == 1:
+                            line_best = 100.0
+                            is_partial = False
+                        else:
+                            line_best = partial_score
+                            is_partial = True
                     else:
-                        line_best = partial_score
-                        is_partial = True
-                else:
-                    line_best = 0.0
-            else:
+                        line_best = 0.0
+                        is_partial = False
+                    if line_best > emp_best_score:
+                        emp_best_score = line_best
+                        emp_best_line = line_idx
+                        emp_best_partial = is_partial
+                if emp_best_score >= list_score:
+                    best_scores[emp_idx] = emp_best_score
+                    best_lines[emp_idx] = emp_best_line
+                    best_partials[emp_idx] = emp_best_partial
+        else:
+            # Pre-build deduplicated windows of sizes (k-1, k, k+1) across all lines
+            unique_wins: list[str] = []
+            win_to_col: dict[str, int] = {}
+            line_win_cols: list[list[int]] = []
+
+            for _, toks in line_tokens:
                 tok_len = len(toks)
-                # Test windows of sizes k-1, k, k+1
+                cols_for_line: list[int] = []
+                seen_on_line: set[int] = set()
                 for w in (k - 1, k, k + 1):
                     if 1 <= w <= tok_len:
                         for s in range(tok_len - w + 1):
                             win = " ".join(toks[s : s + w])
-                            score = float(fuzz.ratio(emp_norm, win))
-                            if score > line_best:
-                                line_best = score
-                                if line_best == 100.0:
-                                    break
-                    if line_best == 100.0:
-                        break
+                            col = win_to_col.get(win)
+                            if col is None:
+                                col = len(unique_wins)
+                                win_to_col[win] = col
+                                unique_wins.append(win)
+                            if col not in seen_on_line:
+                                seen_on_line.add(col)
+                                cols_for_line.append(col)
+                line_win_cols.append(cols_for_line)
 
-                if line_best < accept_score and k >= 2:
-                    if partial_cover(emp_toks, toks):
-                        line_best = partial_score
-                        is_partial = True
+            k_norms = index.by_k_norms[k]
+            if unique_wins:
+                scores_matrix = process.cdist(
+                    k_norms,
+                    unique_wins,
+                    scorer=fuzz.ratio,
+                    score_cutoff=cutoff,
+                    dtype=np.float64,
+                )
+                row_max = scores_matrix.max(axis=1)
+            else:
+                scores_matrix = None
+                row_max = None
 
-            if line_best > emp_best_score:
-                emp_best_score = line_best
-                emp_best_line = line_idx
-                emp_best_partial = is_partial
+            for row_i, emp_idx in enumerate(emp_indices):
+                emp_toks = index.emp_tokens[emp_idx]
+                has_win_hit = row_max is not None and float(row_max[row_i]) > 0.0
+                has_first_tok = emp_toks[0] in page_token_set
+                if not has_win_hit and not has_first_tok:
+                    continue
 
-        if emp_best_score >= list_score:
-            best_scores[emp_idx] = emp_best_score
-            best_lines[emp_idx] = emp_best_line
-            best_partials[emp_idx] = emp_best_partial
+                emp_best_score = -1.0
+                emp_best_line = -1
+                emp_best_partial = False
+                emp_row = scores_matrix[row_i] if scores_matrix is not None else None
+
+                for l_pos, (line_idx, toks) in enumerate(line_tokens):
+                    cols = line_win_cols[l_pos]
+                    if has_win_hit and cols and emp_row is not None:
+                        line_best = float(emp_row[cols].max())
+                    else:
+                        line_best = 0.0
+                    is_partial = False
+
+                    if line_best < accept_score and k >= 2 and has_first_tok:
+                        if emp_toks[0] in toks and partial_cover(emp_toks, toks):
+                            line_best = partial_score
+                            is_partial = True
+
+                    if line_best > emp_best_score:
+                        emp_best_score = line_best
+                        emp_best_line = line_idx
+                        emp_best_partial = is_partial
+
+                if emp_best_score >= list_score:
+                    best_scores[emp_idx] = emp_best_score
+                    best_lines[emp_idx] = emp_best_line
+                    best_partials[emp_idx] = emp_best_partial
 
     raw_cands = [
         Candidate(
@@ -171,7 +258,7 @@ def page_candidates(lines: list[str], employees: list[Employee], cfg: dict) -> l
             line=best_lines[emp_idx],
             partial=best_partials[emp_idx],
         )
-        for emp_idx in best_scores
+        for emp_idx in sorted(best_scores)
     ]
 
     # Subsumption: drop candidate X when another non-partial candidate Y on the same line

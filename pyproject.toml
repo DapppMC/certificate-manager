@@ -18,5 +18,5 @@ certslice = ["default_config.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
-addopts = "-p no:cacheprovider"
+pythonpath = ["src", "tests/acceptance"]
+addopts = "-p no:cacheprovider --import-mode=importlib"
